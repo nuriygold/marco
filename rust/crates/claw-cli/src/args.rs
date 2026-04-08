@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, Parser, PartialEq, Eq)]
-#[command(name = "claw-cli", version, about = "Claw Code CLI")]
+#[command(name = "marco", version, about = "Marco CLI")]
 pub struct Cli {
     #[arg(long, default_value = "claude-opus-4-6")]
     pub model: String,
@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn parses_requested_flags() {
         let cli = Cli::parse_from([
-            "claw-cli",
+            "marco",
             "--model",
             "claude-haiku-4-5-20251213",
             "--permission-mode",
@@ -89,16 +89,16 @@ mod tests {
 
     #[test]
     fn parses_login_and_logout_commands() {
-        let login = Cli::parse_from(["claw-cli", "login"]);
+        let login = Cli::parse_from(["marco", "login"]);
         assert_eq!(login.command, Some(Command::Login));
 
-        let logout = Cli::parse_from(["claw-cli", "logout"]);
+        let logout = Cli::parse_from(["marco", "logout"]);
         assert_eq!(logout.command, Some(Command::Logout));
     }
 
     #[test]
     fn defaults_to_danger_full_access_permission_mode() {
-        let cli = Cli::parse_from(["claw-cli"]);
+        let cli = Cli::parse_from(["marco"]);
         assert_eq!(cli.permission_mode, PermissionMode::DangerFullAccess);
     }
 }

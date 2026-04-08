@@ -637,10 +637,10 @@ impl DefinitionSource {
     fn label(self) -> &'static str {
         match self {
             Self::ProjectCodex => "Project (.codex)",
-            Self::ProjectClaw => "Project (.claw)",
+            Self::ProjectClaw => "Project (.marco)",
             Self::UserCodexHome => "User ($CODEX_HOME)",
             Self::UserCodex => "User (~/.codex)",
-            Self::UserClaw => "User (~/.claw)",
+            Self::UserClaw => "User (~/.marco)",
         }
     }
 }
@@ -1272,6 +1272,11 @@ fn discover_definition_roots(cwd: &Path, leaf: &str) -> Vec<(DefinitionSource, P
         push_unique_root(
             &mut roots,
             DefinitionSource::ProjectClaw,
+            ancestor.join(".marco").join(leaf),
+        );
+        push_unique_root(
+            &mut roots,
+            DefinitionSource::ProjectClaw,
             ancestor.join(".claw").join(leaf),
         );
     }
@@ -1290,6 +1295,11 @@ fn discover_definition_roots(cwd: &Path, leaf: &str) -> Vec<(DefinitionSource, P
             &mut roots,
             DefinitionSource::UserCodex,
             home.join(".codex").join(leaf),
+        );
+        push_unique_root(
+            &mut roots,
+            DefinitionSource::UserClaw,
+            home.join(".marco").join(leaf),
         );
         push_unique_root(
             &mut roots,
@@ -1314,6 +1324,12 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
         push_unique_skill_root(
             &mut roots,
             DefinitionSource::ProjectClaw,
+            ancestor.join(".marco").join("skills"),
+            SkillOrigin::SkillsDir,
+        );
+        push_unique_skill_root(
+            &mut roots,
+            DefinitionSource::ProjectClaw,
             ancestor.join(".claw").join("skills"),
             SkillOrigin::SkillsDir,
         );
@@ -1321,6 +1337,12 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
             &mut roots,
             DefinitionSource::ProjectCodex,
             ancestor.join(".codex").join("commands"),
+            SkillOrigin::LegacyCommandsDir,
+        );
+        push_unique_skill_root(
+            &mut roots,
+            DefinitionSource::ProjectClaw,
+            ancestor.join(".marco").join("commands"),
             SkillOrigin::LegacyCommandsDir,
         );
         push_unique_skill_root(
@@ -1364,8 +1386,20 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
         push_unique_skill_root(
             &mut roots,
             DefinitionSource::UserClaw,
+            home.join(".marco").join("skills"),
+            SkillOrigin::SkillsDir,
+        );
+        push_unique_skill_root(
+            &mut roots,
+            DefinitionSource::UserClaw,
             home.join(".claw").join("skills"),
             SkillOrigin::SkillsDir,
+        );
+        push_unique_skill_root(
+            &mut roots,
+            DefinitionSource::UserClaw,
+            home.join(".marco").join("commands"),
+            SkillOrigin::LegacyCommandsDir,
         );
         push_unique_skill_root(
             &mut roots,
@@ -1709,8 +1743,8 @@ fn render_agents_usage(unexpected: Option<&str>) -> String {
     let mut lines = vec![
         "Agents".to_string(),
         "  Usage            /agents".to_string(),
-        "  Direct CLI       claw agents".to_string(),
-        "  Sources          .codex/agents, .claw/agents, $CODEX_HOME/agents".to_string(),
+        "  Direct CLI       marco agents".to_string(),
+        "  Sources          .codex/agents, .marco/agents, $CODEX_HOME/agents".to_string(),
     ];
     if let Some(args) = unexpected {
         lines.push(format!("  Unexpected       {args}"));
@@ -1722,8 +1756,8 @@ fn render_skills_usage(unexpected: Option<&str>) -> String {
     let mut lines = vec![
         "Skills".to_string(),
         "  Usage            /skills".to_string(),
-        "  Direct CLI       claw skills".to_string(),
-        "  Sources          .codex/skills, .claw/skills, legacy /commands".to_string(),
+        "  Direct CLI       marco skills".to_string(),
+        "  Sources          .codex/skills, .marco/skills, legacy /commands".to_string(),
     ];
     if let Some(args) = unexpected {
         lines.push(format!("  Unexpected       {args}"));

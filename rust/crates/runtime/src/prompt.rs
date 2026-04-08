@@ -211,6 +211,10 @@ fn discover_instruction_files(cwd: &Path) -> std::io::Result<Vec<ContextFile>> {
     let mut files = Vec::new();
     for dir in directories {
         for candidate in [
+            dir.join("MARCO.md"),
+            dir.join("MARCO.local.md"),
+            dir.join(".marco").join("MARCO.md"),
+            dir.join(".marco").join("instructions.md"),
             dir.join("CLAW.md"),
             dir.join("CLAW.local.md"),
             dir.join(".claw").join("CLAW.md"),

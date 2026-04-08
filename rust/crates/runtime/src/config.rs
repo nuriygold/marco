@@ -195,14 +195,22 @@ impl ConfigLoader {
 
     #[must_use]
     pub fn discover(&self) -> Vec<ConfigEntry> {
-        let user_legacy_path = self.config_home.parent().map_or_else(
+        let user_marco_legacy_path = self.config_home.parent().map_or_else(
+            || PathBuf::from(".marco.json"),
+            |parent| parent.join(".marco.json"),
+        );
+        let user_claw_legacy_path = self.config_home.parent().map_or_else(
             || PathBuf::from(".claw.json"),
             |parent| parent.join(".claw.json"),
         );
         vec![
             ConfigEntry {
                 source: ConfigSource::User,
-                path: user_legacy_path,
+                path: user_marco_legacy_path,
+            },
+            ConfigEntry {
+                source: ConfigSource::User,
+                path: user_claw_legacy_path,
             },
             ConfigEntry {
                 source: ConfigSource::User,
@@ -210,11 +218,23 @@ impl ConfigLoader {
             },
             ConfigEntry {
                 source: ConfigSource::Project,
+                path: self.cwd.join(".marco.json"),
+            },
+            ConfigEntry {
+                source: ConfigSource::Project,
                 path: self.cwd.join(".claw.json"),
             },
             ConfigEntry {
                 source: ConfigSource::Project,
+                path: self.cwd.join(".marco").join("settings.json"),
+            },
+            ConfigEntry {
+                source: ConfigSource::Project,
                 path: self.cwd.join(".claw").join("settings.json"),
+            },
+            ConfigEntry {
+                source: ConfigSource::Local,
+                path: self.cwd.join(".marco").join("settings.local.json"),
             },
             ConfigEntry {
                 source: ConfigSource::Local,
@@ -420,10 +440,11 @@ impl RuntimePluginConfig {
 
 #[must_use]
 pub fn default_config_home() -> PathBuf {
-    std::env::var_os("CLAW_CONFIG_HOME")
+    std::env::var_os("MARCO_CONFIG_HOME")
+        .or_else(|| std::env::var_os("CLAW_CONFIG_HOME"))
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claw")))
-        .unwrap_or_else(|| PathBuf::from(".claw"))
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".marco")))
+        .unwrap_or_else(|| PathBuf::from(".marco"))
 }
 
 impl RuntimeHookConfig {
@@ -507,7 +528,7 @@ fn read_optional_json_object(
 
     let parsed = match JsonValue::parse(&contents) {
         Ok(parsed) => parsed,
-        Err(error) if is_legacy_config => return Ok(None),
+        Err(_error) if is_legacy_config => return Ok(None),
         Err(error) => return Err(ConfigError::Parse(format!("{}: {error}", path.display()))),
     };
     let Some(object) = parsed.as_object() else {

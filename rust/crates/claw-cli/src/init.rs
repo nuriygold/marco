@@ -8,8 +8,8 @@ const STARTER_CLAW_JSON: &str = concat!(
     "  }\n",
     "}\n",
 );
-const GITIGNORE_COMMENT: &str = "# Claw Code local artifacts";
-const GITIGNORE_ENTRIES: [&str; 2] = [".claw/settings.local.json", ".claw/sessions/"];
+const GITIGNORE_COMMENT: &str = "# Marco local artifacts";
+const GITIGNORE_ENTRIES: [&str; 2] = [".marco/settings.local.json", ".marco/sessions/"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InitStatus {
@@ -80,15 +80,15 @@ struct RepoDetection {
 pub(crate) fn initialize_repo(cwd: &Path) -> Result<InitReport, Box<dyn std::error::Error>> {
     let mut artifacts = Vec::new();
 
-    let claw_dir = cwd.join(".claw");
+    let claw_dir = cwd.join(".marco");
     artifacts.push(InitArtifact {
-        name: ".claw/",
+        name: ".marco/",
         status: ensure_dir(&claw_dir)?,
     });
 
-    let claw_json = cwd.join(".claw.json");
+    let claw_json = cwd.join(".marco.json");
     artifacts.push(InitArtifact {
-        name: ".claw.json",
+        name: ".marco.json",
         status: write_file_if_missing(&claw_json, STARTER_CLAW_JSON)?,
     });
 
@@ -98,10 +98,10 @@ pub(crate) fn initialize_repo(cwd: &Path) -> Result<InitReport, Box<dyn std::err
         status: ensure_gitignore_entries(&gitignore)?,
     });
 
-    let claw_md = cwd.join("CLAW.md");
+    let claw_md = cwd.join("MARCO.md");
     let content = render_init_claw_md(cwd);
     artifacts.push(InitArtifact {
-        name: "CLAW.md",
+        name: "MARCO.md",
         status: write_file_if_missing(&claw_md, &content)?,
     });
 
@@ -162,9 +162,9 @@ fn ensure_gitignore_entries(path: &Path) -> Result<InitStatus, std::io::Error> {
 pub(crate) fn render_init_claw_md(cwd: &Path) -> String {
     let detection = detect_repo(cwd);
     let mut lines = vec![
-        "# CLAW.md".to_string(),
+        "# MARCO.md".to_string(),
         String::new(),
-        "This file provides guidance to Claw Code (clawcode.dev) when working with code in this repository.".to_string(),
+        "This file provides guidance to Marco when working with code in this repository.".to_string(),
         String::new(),
     ];
 
@@ -209,8 +209,8 @@ pub(crate) fn render_init_claw_md(cwd: &Path) -> String {
 
     lines.push("## Working agreement".to_string());
     lines.push("- Prefer small, reviewable changes and keep generated bootstrap files aligned with actual repo workflows.".to_string());
-    lines.push("- Keep shared defaults in `.claw.json`; reserve `.claw/settings.local.json` for machine-local overrides.".to_string());
-    lines.push("- Do not overwrite existing `CLAW.md` content automatically; update it intentionally when repo workflows change.".to_string());
+    lines.push("- Keep shared defaults in `.marco.json`; reserve `.marco/settings.local.json` for machine-local overrides.".to_string());
+    lines.push("- Do not overwrite existing `MARCO.md` content automatically; update it intentionally when repo workflows change.".to_string());
     lines.push(String::new());
 
     lines.join("\n")

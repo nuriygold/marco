@@ -28,7 +28,7 @@ use commands::{
 };
 use compat_harness::{extract_manifest, UpstreamPaths};
 use init::initialize_repo;
-use plugins::{PluginManager, PluginManagerConfig};
+use plugins::{PluginManager, PluginManagerConfig, PluginRegistry};
 use render::{MarkdownStreamState, Spinner, TerminalRenderer};
 use runtime::{
     clear_oauth_credentials, generate_pkce_pair, generate_state, load_system_prompt,
@@ -75,7 +75,7 @@ fn render_cli_error(problem: &str) -> String {
         };
         lines.push(format!("{label}{line}"));
     }
-    lines.push("  Help             claw --help".to_string());
+    lines.push("  Help             marco --help".to_string());
     lines.join("\n")
 }
 
@@ -353,9 +353,9 @@ fn format_direct_slash_command_error(command: &str, is_unknown: bool) -> String 
     if is_unknown {
         append_slash_command_suggestions(&mut lines, trimmed);
     } else {
-        lines.push("  Try              Start `claw` to use interactive slash commands".to_string());
+        lines.push("  Try              Start `marco` to use interactive slash commands".to_string());
         lines.push(
-            "  Tip              Resume-safe commands also work with `claw --resume SESSION.json ...`"
+            "  Tip              Resume-safe commands also work with `marco --resume SESSION.json ...`"
                 .to_string(),
         );
     }
@@ -1116,16 +1116,16 @@ impl LiveCli {
             || workspace_name.to_string(),
             |branch| format!("{workspace_name} · {branch}"),
         );
-        let has_claw_md = cwd
+        let has_marco_md = cwd
             .as_ref()
-            .is_some_and(|path| path.join("CLAW.md").is_file());
+            .is_some_and(|path| path.join("MARCO.md").is_file());
         let mut lines = vec![
             format!(
                 "{} {}",
                 if color {
-                    "\x1b[1;38;5;45m🦞 Claw Code\x1b[0m"
+                    "\x1b[1;38;5;45mMarco\x1b[0m"
                 } else {
-                    "Claw Code"
+                    "Marco"
                 },
                 if color {
                     "\x1b[2m· ready\x1b[0m"
@@ -1140,7 +1140,7 @@ impl LiveCli {
             format!("  Session          {}", self.session.id),
             format!(
                 "  Quick start      {}",
-                if has_claw_md {
+                if has_marco_md {
                     "/help · /status · ask for a task"
                 } else {
                     "/init · /help · /status"
@@ -1150,9 +1150,9 @@ impl LiveCli {
                 .to_string(),
             "  Multiline        Shift+Enter or Ctrl+J inserts a newline".to_string(),
         ];
-        if !has_claw_md {
+        if !has_marco_md {
             lines.push(
-                "  First run        /init scaffolds CLAW.md, .claw.json, and local session files"
+                "  First run        /init scaffolds MARCO.md, .marco.json, and local session files"
                     .to_string(),
             );
         }
@@ -1858,7 +1858,7 @@ impl LiveCli {
 
 fn sessions_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
-    let path = cwd.join(".claw").join("sessions");
+    let path = cwd.join(".marco").join("sessions");
     fs::create_dir_all(&path)?;
     Ok(path)
 }
@@ -2487,7 +2487,7 @@ fn render_version_report() -> String {
     let git_sha = GIT_SHA.unwrap_or("unknown");
     let target = BUILD_TARGET.unwrap_or("unknown");
     format!(
-        "Claw Code\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Build date       {DEFAULT_DATE}\n\nSupport\n  Help             claw --help\n  REPL             /help"
+        "Marco\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Build date       {DEFAULT_DATE}\n\nSupport\n  Help             marco --help\n  REPL             /help"
     )
 }
 
@@ -2587,14 +2587,67 @@ fn build_system_prompt() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     )?)
 }
 
-fn build_runtime_plugin_state(
-) -> Result<(runtime::RuntimeFeatureConfig, GlobalToolRegistry), Box<dyn std::error::Error>> {
+struct PluginRuntimeLifecycle {
+    registry: PluginRegistry,
+}
+
+impl PluginRuntimeLifecycle {
+    fn initialize(registry: PluginRegistry) -> Result<Self, Box<dyn std::error::Error>> {
+        registry.initialize()?;
+        Ok(Self { registry })
+    }
+}
+
+impl Drop for PluginRuntimeLifecycle {
+    fn drop(&mut self) {
+        if let Err(error) = self.registry.shutdown() {
+            eprintln!("warning: plugin shutdown failed: {error}");
+        }
+    }
+}
+
+fn build_runtime_plugin_state() -> Result<
+    (
+        runtime::RuntimeFeatureConfig,
+        GlobalToolRegistry,
+        PluginRuntimeLifecycle,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let cwd = env::current_dir()?;
-    let loader = ConfigLoader::default_for(&cwd);
+    build_runtime_plugin_state_for(&cwd)
+}
+
+fn build_runtime_plugin_state_for(cwd: &Path) -> Result<
+    (
+        runtime::RuntimeFeatureConfig,
+        GlobalToolRegistry,
+        PluginRuntimeLifecycle,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let loader = ConfigLoader::default_for(cwd);
     let runtime_config = loader.load()?;
-    let plugin_manager = build_plugin_manager(&cwd, &loader, &runtime_config);
-    let tool_registry = GlobalToolRegistry::with_plugin_tools(plugin_manager.aggregated_tools()?)?;
-    Ok((runtime_config.feature_config().clone(), tool_registry))
+    let plugin_manager = build_plugin_manager(cwd, &loader, &runtime_config);
+    let plugin_registry = plugin_manager.plugin_registry()?;
+    let plugin_tools = plugin_registry.aggregated_tools()?;
+    let plugin_hooks = plugin_registry.aggregated_hooks()?;
+    let plugin_hook_config = runtime::RuntimeHookConfig::new(
+        plugin_hooks.pre_tool_use,
+        plugin_hooks.post_tool_use,
+    );
+    let merged_hooks = runtime_config
+        .feature_config()
+        .hooks()
+        .merged(&plugin_hook_config);
+    let feature_config = runtime_config
+        .feature_config()
+        .clone()
+        .with_hooks(merged_hooks);
+    let tool_registry = GlobalToolRegistry::with_plugin_tools(plugin_tools)?;
+    let plugin_lifecycle = PluginRuntimeLifecycle::initialize(plugin_registry)?;
+
+    Ok((feature_config, tool_registry, plugin_lifecycle))
 }
 
 fn build_plugin_manager(
@@ -2974,7 +3027,7 @@ fn build_runtime(
     progress_reporter: Option<InternalPromptProgressReporter>,
 ) -> Result<ConversationRuntime<DefaultRuntimeClient, CliToolExecutor>, Box<dyn std::error::Error>>
 {
-    let (feature_config, tool_registry) = build_runtime_plugin_state()?;
+    let (feature_config, tool_registry, plugin_lifecycle) = build_runtime_plugin_state()?;
     Ok(ConversationRuntime::new_with_features(
         session,
         DefaultRuntimeClient::new(
@@ -2985,7 +3038,12 @@ fn build_runtime(
             tool_registry.clone(),
             progress_reporter,
         )?,
-        CliToolExecutor::new(allowed_tools.clone(), emit_output, tool_registry.clone()),
+        CliToolExecutor::new(
+            allowed_tools.clone(),
+            emit_output,
+            tool_registry.clone(),
+            plugin_lifecycle,
+        ),
         permission_policy(permission_mode, &tool_registry),
         system_prompt,
         feature_config,
@@ -3853,6 +3911,7 @@ struct CliToolExecutor {
     emit_output: bool,
     allowed_tools: Option<AllowedToolSet>,
     tool_registry: GlobalToolRegistry,
+    _plugin_lifecycle: PluginRuntimeLifecycle,
 }
 
 impl CliToolExecutor {
@@ -3860,12 +3919,14 @@ impl CliToolExecutor {
         allowed_tools: Option<AllowedToolSet>,
         emit_output: bool,
         tool_registry: GlobalToolRegistry,
+        plugin_lifecycle: PluginRuntimeLifecycle,
     ) -> Self {
         Self {
             renderer: TerminalRenderer::new(),
             emit_output,
             allowed_tools,
             tool_registry,
+            _plugin_lifecycle: plugin_lifecycle,
         }
     }
 }
@@ -3957,7 +4018,7 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
 }
 
 fn print_help_to(out: &mut impl Write) -> io::Result<()> {
-    writeln!(out, "Claw Code CLI v{VERSION}")?;
+    writeln!(out, "Marco CLI v{VERSION}")?;
     writeln!(
         out,
         "  Interactive coding assistant for the current workspace."
@@ -3966,19 +4027,19 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "Quick start")?;
     writeln!(
         out,
-        "  claw                                  Start the interactive REPL"
+        "  marco                                 Start the interactive REPL"
     )?;
     writeln!(
         out,
-        "  claw \"summarize this repo\"            Run one prompt and exit"
+        "  marco \"summarize this repo\"           Run one prompt and exit"
     )?;
     writeln!(
         out,
-        "  claw prompt \"explain src/main.rs\"     Explicit one-shot prompt"
+        "  marco prompt \"explain src/main.rs\"    Explicit one-shot prompt"
     )?;
     writeln!(
         out,
-        "  claw --resume SESSION.json /status    Inspect a saved session"
+        "  marco --resume SESSION.json /status   Inspect a saved session"
     )?;
     writeln!(out)?;
     writeln!(out, "Interactive essentials")?;
@@ -4014,32 +4075,32 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "Commands")?;
     writeln!(
         out,
-        "  claw dump-manifests                   Read upstream TS sources and print extracted counts"
+        "  marco dump-manifests                  Read upstream TS sources and print extracted counts"
     )?;
     writeln!(
         out,
-        "  claw bootstrap-plan                   Print the bootstrap phase skeleton"
+        "  marco bootstrap-plan                  Print the bootstrap phase skeleton"
     )?;
     writeln!(
         out,
-        "  claw agents                           List configured agents"
+        "  marco agents                          List configured agents"
     )?;
     writeln!(
         out,
-        "  claw skills                           List installed skills"
+        "  marco skills                          List installed skills"
     )?;
-    writeln!(out, "  claw system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
+    writeln!(out, "  marco system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
     writeln!(
         out,
-        "  claw login                            Start the OAuth login flow"
-    )?;
-    writeln!(
-        out,
-        "  claw logout                           Clear saved OAuth credentials"
+        "  marco login                           Start the OAuth login flow"
     )?;
     writeln!(
         out,
-        "  claw init                             Scaffold CLAW.md + local files"
+        "  marco logout                          Clear saved OAuth credentials"
+    )?;
+    writeln!(
+        out,
+        "  marco init                            Scaffold MARCO.md + local files"
     )?;
     writeln!(out)?;
     writeln!(out, "Flags")?;
@@ -4081,23 +4142,23 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         .join(", ");
     writeln!(out, "Resume-safe commands: {resume_commands}")?;
     writeln!(out, "Examples")?;
-    writeln!(out, "  claw --model opus \"summarize this repo\"")?;
+    writeln!(out, "  marco --model opus \"summarize this repo\"")?;
     writeln!(
         out,
-        "  claw --output-format json prompt \"explain src/main.rs\""
+        "  marco --output-format json prompt \"explain src/main.rs\""
     )?;
     writeln!(
         out,
-        "  claw --allowedTools read,glob \"summarize Cargo.toml\""
+        "  marco --allowedTools read,glob \"summarize Cargo.toml\""
     )?;
     writeln!(
         out,
-        "  claw --resume session.json /status /diff /export notes.txt"
+        "  marco --resume session.json /status /diff /export notes.txt"
     )?;
-    writeln!(out, "  claw agents")?;
-    writeln!(out, "  claw /skills")?;
-    writeln!(out, "  claw login")?;
-    writeln!(out, "  claw init")?;
+    writeln!(out, "  marco agents")?;
+    writeln!(out, "  marco /skills")?;
+    writeln!(out, "  marco login")?;
+    writeln!(out, "  marco init")?;
     Ok(())
 }
 
@@ -4108,6 +4169,7 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::{
+        build_runtime_plugin_state_for,
         describe_tool_progress, filter_tool_specs, format_compact_report, format_cost_report,
         format_internal_prompt_progress_line, format_model_report, format_model_switch_report,
         format_permissions_report, format_permissions_switch_report, format_resume_report,
@@ -4121,11 +4183,16 @@ mod tests {
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{PluginTool, PluginToolDefinition, PluginToolPermission};
-    use runtime::{AssistantEvent, ContentBlock, ConversationMessage, MessageRole, PermissionMode};
+    use runtime::{
+        AssistantEvent, ContentBlock, ConversationMessage, HookRunner, MessageRole, PermissionMode,
+    };
     use serde_json::json;
-    use std::path::PathBuf;
-    use std::time::Duration;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tools::GlobalToolRegistry;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     fn registry_with_plugin_tool() -> GlobalToolRegistry {
         GlobalToolRegistry::with_plugin_tools(vec![PluginTool::new(
@@ -4149,6 +4216,150 @@ mod tests {
             None,
         )])
         .expect("plugin tool registry should build")
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be after unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("claw-cli-{prefix}-{nanos}"));
+        fs::create_dir_all(&path).expect("temp directory should be created");
+        path
+    }
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent directory should be created");
+        }
+        fs::write(path, contents).expect("file should be written");
+    }
+
+    fn canonicalize_hook_entry(entry: &str) -> String {
+        let path = PathBuf::from(entry);
+        if path.is_absolute() {
+            fs::canonicalize(&path)
+                .unwrap_or(path)
+                .display()
+                .to_string()
+        } else {
+            entry.to_string()
+        }
+    }
+
+    fn make_executable(path: &Path) {
+        #[cfg(unix)]
+        {
+            let mut permissions = fs::metadata(path)
+                .expect("metadata should load")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).expect("permissions should update");
+        }
+    }
+
+    fn setup_plugin_runtime_fixture() -> (
+        PathBuf,
+        String,
+        String,
+        PathBuf,
+        PathBuf,
+        PathBuf,
+    ) {
+        let workspace = temp_dir("plugin-runtime");
+        let pre_hook_path = workspace.join("external-plugins/runtime-hook/hooks/pre.sh");
+        let post_hook_path = workspace.join("external-plugins/runtime-hook/hooks/post.sh");
+        let init_path = workspace.join("external-plugins/runtime-hook/hooks/init.sh");
+        let shutdown_path = workspace.join("external-plugins/runtime-hook/hooks/shutdown.sh");
+        let init_marker = workspace.join("plugin-init.log");
+        let shutdown_marker = workspace.join("plugin-shutdown.log");
+
+        write_file(
+            &pre_hook_path,
+            "#!/bin/sh\nprintf \"plugin pre hook\"\n",
+        );
+        make_executable(&pre_hook_path);
+        write_file(
+            &post_hook_path,
+            "#!/bin/sh\nprintf \"plugin post hook\"\n",
+        );
+        make_executable(&post_hook_path);
+        write_file(
+            &init_path,
+            &format!(
+                "#!/bin/sh\nprintf \"initialized\" > \"{}\"\n",
+                init_marker.display()
+            ),
+        );
+        make_executable(&init_path);
+        write_file(
+            &shutdown_path,
+            &format!(
+                "#!/bin/sh\nprintf \"shutdown\" > \"{}\"\n",
+                shutdown_marker.display()
+            ),
+        );
+        make_executable(&shutdown_path);
+
+        let manifest = json!({
+            "name": "runtime-hook-plugin",
+            "version": "0.1.0",
+            "description": "Plugin fixture for runtime hook/lifecycle tests",
+            "permissions": ["execute"],
+            "defaultEnabled": true,
+            "hooks": {
+                "PreToolUse": ["./hooks/pre.sh"],
+                "PostToolUse": ["./hooks/post.sh"]
+            },
+            "lifecycle": {
+                "Init": ["./hooks/init.sh"],
+                "Shutdown": ["./hooks/shutdown.sh"]
+            },
+            "tools": [],
+            "commands": []
+        });
+        write_file(
+            &workspace.join("external-plugins/runtime-hook/plugin.json"),
+            &manifest.to_string(),
+        );
+
+        let settings = json!({
+            "hooks": {
+                "PreToolUse": ["echo base pre hook"]
+            },
+            "plugins": {
+                "enabled": {
+                    "runtime-hook-plugin@external": true
+                },
+                "externalDirectories": ["./external-plugins"],
+                "bundledRoot": "./bundled-plugins",
+                "installRoot": "./.claw/plugins/installed",
+                "registryPath": "./.claw/plugins/installed.json"
+            }
+        });
+        write_file(
+            &workspace.join(".claw/settings.json"),
+            &settings.to_string(),
+        );
+        fs::create_dir_all(workspace.join("bundled-plugins"))
+            .expect("bundled plugins directory should be created");
+        let expected_pre_hook = fs::canonicalize(&pre_hook_path)
+            .unwrap_or(pre_hook_path.clone())
+            .display()
+            .to_string();
+        let expected_post_hook = fs::canonicalize(&post_hook_path)
+            .unwrap_or(post_hook_path.clone())
+            .display()
+            .to_string();
+
+        (
+            workspace,
+            expected_pre_hook,
+            expected_post_hook,
+            init_marker,
+            shutdown_marker,
+            shutdown_path,
+        )
     }
 
     #[test]
@@ -4425,6 +4636,107 @@ mod tests {
         let policy = permission_policy(PermissionMode::ReadOnly, &registry_with_plugin_tool());
         let required = policy.required_mode_for("plugin_echo");
         assert_eq!(required, PermissionMode::WorkspaceWrite);
+    }
+
+    #[test]
+    fn runtime_plugin_state_merges_local_and_plugin_hooks() {
+        let (
+            workspace,
+            expected_pre_hook,
+            expected_post_hook,
+            init_marker,
+            _shutdown_marker,
+            _shutdown_path,
+        ) = setup_plugin_runtime_fixture();
+
+        let (feature_config, _tool_registry, lifecycle) =
+            build_runtime_plugin_state_for(&workspace).expect("plugin runtime state should build");
+
+        let pre_hooks = feature_config.hooks().pre_tool_use().to_vec();
+        let post_hooks = feature_config.hooks().post_tool_use().to_vec();
+        let canonical_pre_hooks = pre_hooks
+            .iter()
+            .map(|entry| canonicalize_hook_entry(entry))
+            .collect::<Vec<_>>();
+        let canonical_post_hooks = post_hooks
+            .iter()
+            .map(|entry| canonicalize_hook_entry(entry))
+            .collect::<Vec<_>>();
+
+        assert!(
+            canonical_pre_hooks.contains(&"echo base pre hook".to_string()),
+            "pre hooks were {pre_hooks:?}"
+        );
+        assert!(
+            canonical_pre_hooks.contains(&expected_pre_hook),
+            "expected plugin pre hook {expected_pre_hook}, got {pre_hooks:?}"
+        );
+        assert!(
+            canonical_post_hooks.contains(&expected_post_hook),
+            "expected plugin post hook {expected_post_hook}, got {post_hooks:?}"
+        );
+        assert!(init_marker.is_file());
+
+        drop(lifecycle);
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn runtime_plugin_state_executes_plugin_hooks_and_shutdown_lifecycle() {
+        let (
+            workspace,
+            expected_pre_hook,
+            expected_post_hook,
+            _init_marker,
+            shutdown_marker,
+            _shutdown_path,
+        ) = setup_plugin_runtime_fixture();
+
+        let (feature_config, _tool_registry, lifecycle) =
+            build_runtime_plugin_state_for(&workspace).expect("plugin runtime state should build");
+
+        let runner = HookRunner::from_feature_config(&feature_config);
+        let pre = runner.run_pre_tool_use("read_file", r#"{"path":"README.md"}"#);
+        let post = runner.run_post_tool_use(
+            "read_file",
+            r#"{"path":"README.md"}"#,
+            "ok",
+            false,
+        );
+        let canonical_pre_hooks = feature_config
+            .hooks()
+            .pre_tool_use()
+            .iter()
+            .map(|entry| canonicalize_hook_entry(entry))
+            .collect::<Vec<_>>();
+        let canonical_post_hooks = feature_config
+            .hooks()
+            .post_tool_use()
+            .iter()
+            .map(|entry| canonicalize_hook_entry(entry))
+            .collect::<Vec<_>>();
+
+        assert!(!pre.is_denied());
+        assert!(!post.is_denied());
+        assert!(
+            canonical_pre_hooks.contains(&expected_pre_hook),
+            "pre hooks were {:?}",
+            feature_config.hooks().pre_tool_use()
+        );
+        assert!(
+            canonical_post_hooks.contains(&expected_post_hook),
+            "post hooks were {:?}",
+            feature_config.hooks().post_tool_use()
+        );
+        assert!(pre.messages().iter().any(|message| message.contains("plugin pre hook")));
+        assert!(post
+            .messages()
+            .iter()
+            .any(|message| message.contains("plugin post hook")));
+
+        drop(lifecycle);
+        assert!(shutdown_marker.is_file());
+        let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]

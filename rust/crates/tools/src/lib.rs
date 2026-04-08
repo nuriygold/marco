@@ -479,7 +479,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "Config",
-            description: "Get or set Claw Code settings.",
+            description: "Get or set Marco settings.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1102,6 +1102,11 @@ fn normalize_fetch_url(url: &str) -> Result<String, String> {
 }
 
 fn build_search_url(query: &str) -> Result<reqwest::Url, String> {
+    if let Ok(base) = std::env::var("MARCO_WEB_SEARCH_BASE_URL") {
+        let mut url = reqwest::Url::parse(&base).map_err(|error| error.to_string())?;
+        url.query_pairs_mut().append_pair("q", query);
+        return Ok(url);
+    }
     if let Ok(base) = std::env::var("CLAW_WEB_SEARCH_BASE_URL") {
         let mut url = reqwest::Url::parse(&base).map_err(|error| error.to_string())?;
         url.query_pairs_mut().append_pair("q", query);
@@ -1447,11 +1452,14 @@ fn validate_todos(todos: &[TodoItem]) -> Result<(), String> {
 }
 
 fn todo_store_path() -> Result<std::path::PathBuf, String> {
+    if let Ok(path) = std::env::var("MARCO_TODO_STORE") {
+        return Ok(std::path::PathBuf::from(path));
+    }
     if let Ok(path) = std::env::var("CLAW_TODO_STORE") {
         return Ok(std::path::PathBuf::from(path));
     }
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-    Ok(cwd.join(".claw-todos.json"))
+    Ok(cwd.join(".marco-todos.json"))
 }
 
 fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
@@ -2206,14 +2214,17 @@ fn canonical_tool_token(value: &str) -> String {
 }
 
 fn agent_store_dir() -> Result<std::path::PathBuf, String> {
+    if let Ok(path) = std::env::var("MARCO_AGENT_STORE") {
+        return Ok(std::path::PathBuf::from(path));
+    }
     if let Ok(path) = std::env::var("CLAW_AGENT_STORE") {
         return Ok(std::path::PathBuf::from(path));
     }
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
     if let Some(workspace_root) = cwd.ancestors().nth(2) {
-        return Ok(workspace_root.join(".claw-agents"));
+        return Ok(workspace_root.join(".marco-agents"));
     }
-    Ok(cwd.join(".claw-agents"))
+    Ok(cwd.join(".marco-agents"))
 }
 
 fn make_agent_id() -> String {
@@ -2754,16 +2765,19 @@ fn config_file_for_scope(scope: ConfigScope) -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
     Ok(match scope {
         ConfigScope::Global => config_home_dir()?.join("settings.json"),
-        ConfigScope::Settings => cwd.join(".claw").join("settings.local.json"),
+        ConfigScope::Settings => cwd.join(".marco").join("settings.local.json"),
     })
 }
 
 fn config_home_dir() -> Result<PathBuf, String> {
+    if let Ok(path) = std::env::var("MARCO_CONFIG_HOME") {
+        return Ok(PathBuf::from(path));
+    }
     if let Ok(path) = std::env::var("CLAW_CONFIG_HOME") {
         return Ok(PathBuf::from(path));
     }
     let home = std::env::var("HOME").map_err(|_| String::from("HOME is not set"))?;
-    Ok(PathBuf::from(home).join(".claw"))
+    Ok(PathBuf::from(home).join(".marco"))
 }
 
 fn read_json_object(path: &Path) -> Result<serde_json::Map<String, Value>, String> {
@@ -3452,6 +3466,17 @@ mod tests {
         let _guard = env_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let codex_home = temp_path("codex-home");
+        let skill_path = codex_home.join("skills").join("help");
+        fs::create_dir_all(&skill_path).expect("skill directory should be created");
+        fs::write(
+            skill_path.join("SKILL.md"),
+            "# Help\n\nGuide on using oh-my-codex plugin",
+        )
+        .expect("skill file should be written");
+        let previous_codex_home = std::env::var("CODEX_HOME").ok();
+        std::env::set_var("CODEX_HOME", &codex_home);
+
         let result = execute_tool(
             "Skill",
             &json!({
@@ -3486,6 +3511,13 @@ mod tests {
             .as_str()
             .expect("path")
             .ends_with("/help/SKILL.md"));
+
+        if let Some(previous) = previous_codex_home {
+            std::env::set_var("CODEX_HOME", previous);
+        } else {
+            std::env::remove_var("CODEX_HOME");
+        }
+        let _ = fs::remove_dir_all(codex_home);
     }
 
     #[test]
