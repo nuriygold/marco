@@ -180,6 +180,20 @@ python3 -m src.main commands --limit 10
 python3 -m src.main tools --limit 10
 ```
 
+## Operator guide
+
+For day-to-day setup, operations, plugin lifecycle behavior, and health checks, see [`OPERATOR.md`](OPERATOR.md).
+
+## Integration packet
+
+For production adoption planning and rollout gating, see:
+
+- [`docs/integration/GO_NO_GO_CHECKLIST.md`](docs/integration/GO_NO_GO_CHECKLIST.md)
+- [`docs/integration/SECURITY_GOVERNANCE_POLICY.md`](docs/integration/SECURITY_GOVERNANCE_POLICY.md)
+- [`docs/integration/TECHNICAL_READINESS.md`](docs/integration/TECHNICAL_READINESS.md)
+- [`docs/integration/PILOT_PLAN.md`](docs/integration/PILOT_PLAN.md)
+- [`docs/integration/DECISION_RULES.md`](docs/integration/DECISION_RULES.md)
+
 ## Current Parity Checkpoint
 
 The port now mirrors the archived root-entry file surface, top-level subsystem names, and command/tool inventories much more closely than before. However, it is **not yet** a full runtime-equivalent replacement for the original TypeScript system; the Python tree still contains fewer executable runtime slices than the archived source.
