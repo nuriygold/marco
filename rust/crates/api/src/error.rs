@@ -8,6 +8,7 @@ pub enum ApiError {
         provider: &'static str,
         env_vars: &'static [&'static str],
     },
+    Configuration(String),
     ExpiredOAuthToken,
     Auth(String),
     InvalidApiKeyEnv(VarError),
@@ -48,6 +49,7 @@ impl ApiError {
             Self::Api { retryable, .. } => *retryable,
             Self::RetriesExhausted { last_error, .. } => last_error.is_retryable(),
             Self::MissingCredentials { .. }
+            | Self::Configuration(_)
             | Self::ExpiredOAuthToken
             | Self::Auth(_)
             | Self::InvalidApiKeyEnv(_)
@@ -67,6 +69,7 @@ impl Display for ApiError {
                 "missing {provider} credentials; export {} before calling the {provider} API",
                 env_vars.join(" or ")
             ),
+            Self::Configuration(message) => write!(f, "configuration error: {message}"),
             Self::ExpiredOAuthToken => {
                 write!(
                     f,

@@ -232,6 +232,89 @@ async fn provider_client_dispatches_xai_requests_from_env() {
     );
 }
 
+#[tokio::test]
+async fn azure_openai_v1_uses_api_key_header_and_v1_path() {
+    let _lock = env_lock();
+    let state = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
+    let server = spawn_server(
+        state.clone(),
+        vec![http_response(
+            "200 OK",
+            "application/json",
+            "{\"id\":\"chatcmpl_azure_v1\",\"model\":\"azure-gpt-4.1\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Hello from Azure\",\"tool_calls\":[]},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":4}}",
+        )],
+    )
+    .await;
+
+    let client = OpenAiCompatClient::new(
+        "azure-test-key",
+        OpenAiCompatConfig::azure_openai(),
+    )
+    .with_base_url(format!("{}/openai/v1", server.base_url()));
+    let response = client
+        .send_message(&sample_request(false))
+        .await
+        .expect("azure v1 request should succeed");
+
+    assert_eq!(response.total_tokens(), 10);
+
+    let captured = state.lock().await;
+    let request = captured.first().expect("captured request");
+    assert_eq!(request.path, "/openai/v1/chat/completions");
+    assert_eq!(
+        request.headers.get("api-key").map(String::as_str),
+        Some("azure-test-key")
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&request.body)
+            .expect("json body")["model"]
+            .is_string()
+    );
+}
+
+#[tokio::test]
+async fn azure_openai_legacy_uses_deployment_path_and_api_version() {
+    let _lock = env_lock();
+    let _deployment = ScopedEnvVar::set("AZURE_OPENAI_DEPLOYMENT", "chat-prod");
+    let _api_version = ScopedEnvVar::set("AZURE_OPENAI_API_VERSION", "2024-10-21");
+
+    let state = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
+    let server = spawn_server(
+        state.clone(),
+        vec![http_response(
+            "200 OK",
+            "application/json",
+            "{\"id\":\"chatcmpl_azure_legacy\",\"model\":\"chat-prod\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Legacy Azure works\",\"tool_calls\":[]},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3}}",
+        )],
+    )
+    .await;
+
+    let client = OpenAiCompatClient::new(
+        "azure-test-key",
+        OpenAiCompatConfig::azure_openai(),
+    )
+    .with_base_url(server.base_url());
+    let response = client
+        .send_message(&sample_request(false))
+        .await
+        .expect("azure legacy request should succeed");
+
+    assert_eq!(response.total_tokens(), 11);
+
+    let captured = state.lock().await;
+    let request = captured.first().expect("captured request");
+    assert_eq!(
+        request.path,
+        "/openai/deployments/chat-prod/chat/completions?api-version=2024-10-21"
+    );
+    assert_eq!(
+        request.headers.get("api-key").map(String::as_str),
+        Some("azure-test-key")
+    );
+    let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
+    assert!(body.get("model").is_none());
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CapturedRequest {
     path: String,

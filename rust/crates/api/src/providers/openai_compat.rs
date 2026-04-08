@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
+use reqwest::Url;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -16,6 +17,7 @@ use super::{Provider, ProviderFuture};
 
 pub const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+pub const DEFAULT_AZURE_OPENAI_API_VERSION: &str = "2024-10-21";
 const REQUEST_ID_HEADER: &str = "request-id";
 const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
 const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(200);
@@ -23,15 +25,27 @@ const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(2);
 const DEFAULT_MAX_RETRIES: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthHeaderKind {
+    Bearer,
+    ApiKey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenAiCompatConfig {
     pub provider_name: &'static str,
     pub api_key_env: &'static str,
     pub base_url_env: &'static str,
+    pub fallback_base_url_env: Option<&'static str>,
     pub default_base_url: &'static str,
+    auth_header: AuthHeaderKind,
+    azure_deployment_env: Option<&'static str>,
+    azure_api_version_env: Option<&'static str>,
+    azure_default_api_version: Option<&'static str>,
 }
 
 const XAI_ENV_VARS: &[&str] = &["XAI_API_KEY"];
 const OPENAI_ENV_VARS: &[&str] = &["OPENAI_API_KEY"];
+const AZURE_OPENAI_ENV_VARS: &[&str] = &["AZURE_OPENAI_API_KEY"];
 
 impl OpenAiCompatConfig {
     #[must_use]
@@ -40,7 +54,12 @@ impl OpenAiCompatConfig {
             provider_name: "xAI",
             api_key_env: "XAI_API_KEY",
             base_url_env: "XAI_BASE_URL",
+            fallback_base_url_env: None,
             default_base_url: DEFAULT_XAI_BASE_URL,
+            auth_header: AuthHeaderKind::Bearer,
+            azure_deployment_env: None,
+            azure_api_version_env: None,
+            azure_default_api_version: None,
         }
     }
 
@@ -50,7 +69,27 @@ impl OpenAiCompatConfig {
             provider_name: "OpenAI",
             api_key_env: "OPENAI_API_KEY",
             base_url_env: "OPENAI_BASE_URL",
+            fallback_base_url_env: None,
             default_base_url: DEFAULT_OPENAI_BASE_URL,
+            auth_header: AuthHeaderKind::Bearer,
+            azure_deployment_env: None,
+            azure_api_version_env: None,
+            azure_default_api_version: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn azure_openai() -> Self {
+        Self {
+            provider_name: "Azure OpenAI",
+            api_key_env: "AZURE_OPENAI_API_KEY",
+            base_url_env: "AZURE_OPENAI_BASE_URL",
+            fallback_base_url_env: Some("AZURE_OPENAI_ENDPOINT"),
+            default_base_url: "",
+            auth_header: AuthHeaderKind::ApiKey,
+            azure_deployment_env: Some("AZURE_OPENAI_DEPLOYMENT"),
+            azure_api_version_env: Some("AZURE_OPENAI_API_VERSION"),
+            azure_default_api_version: Some(DEFAULT_AZURE_OPENAI_API_VERSION),
         }
     }
     #[must_use]
@@ -58,14 +97,20 @@ impl OpenAiCompatConfig {
         match self.provider_name {
             "xAI" => XAI_ENV_VARS,
             "OpenAI" => OPENAI_ENV_VARS,
+            "Azure OpenAI" => AZURE_OPENAI_ENV_VARS,
             _ => &[],
         }
+    }
+
+    const fn is_azure(self) -> bool {
+        matches!(self.auth_header, AuthHeaderKind::ApiKey)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct OpenAiCompatClient {
     http: reqwest::Client,
+    config: OpenAiCompatConfig,
     api_key: String,
     base_url: String,
     max_retries: u32,
@@ -78,6 +123,7 @@ impl OpenAiCompatClient {
     pub fn new(api_key: impl Into<String>, config: OpenAiCompatConfig) -> Self {
         Self {
             http: reqwest::Client::new(),
+            config,
             api_key: api_key.into(),
             base_url: read_base_url(config),
             max_retries: DEFAULT_MAX_RETRIES,
@@ -93,7 +139,9 @@ impl OpenAiCompatClient {
                 config.credential_env_vars(),
             ));
         };
-        Ok(Self::new(api_key, config))
+        let client = Self::new(api_key, config);
+        client.validate_configuration()?;
+        Ok(client)
     }
 
     #[must_use]
@@ -185,12 +233,18 @@ impl OpenAiCompatClient {
         &self,
         request: &MessageRequest,
     ) -> Result<reqwest::Response, ApiError> {
-        let request_url = chat_completions_endpoint(&self.base_url);
-        self.http
+        let request_url = self.request_url()?;
+        let use_model_field = !self.uses_azure_legacy_endpoint()?;
+        let request_builder = self
+            .http
             .post(&request_url)
-            .header("content-type", "application/json")
-            .bearer_auth(&self.api_key)
-            .json(&build_chat_completion_request(request))
+            .header("content-type", "application/json");
+        let request_builder = match self.config.auth_header {
+            AuthHeaderKind::Bearer => request_builder.bearer_auth(&self.api_key),
+            AuthHeaderKind::ApiKey => request_builder.header("api-key", &self.api_key),
+        };
+        request_builder
+            .json(&build_chat_completion_request(request, use_model_field))
             .send()
             .await
             .map_err(ApiError::from)
@@ -207,6 +261,51 @@ impl OpenAiCompatClient {
             .initial_backoff
             .checked_mul(multiplier)
             .map_or(self.max_backoff, |delay| delay.min(self.max_backoff)))
+    }
+
+    fn validate_configuration(&self) -> Result<(), ApiError> {
+        if self.base_url.trim().is_empty() {
+            let fallback = self
+                .config
+                .fallback_base_url_env
+                .map(|name| format!(" or {name}"))
+                .unwrap_or_default();
+            return Err(ApiError::Configuration(format!(
+                "{} requires {}{} to be set",
+                self.config.provider_name, self.config.base_url_env, fallback
+            )));
+        }
+        let _ = self.request_url()?;
+        Ok(())
+    }
+
+    fn request_url(&self) -> Result<String, ApiError> {
+        if self.config.is_azure() {
+            azure_chat_completions_endpoint(&self.base_url, self.azure_deployment(), self.azure_api_version())
+        } else {
+            Ok(chat_completions_endpoint(&self.base_url))
+        }
+    }
+
+    fn uses_azure_legacy_endpoint(&self) -> Result<bool, ApiError> {
+        if !self.config.is_azure() {
+            return Ok(false);
+        }
+        let url = parse_url(&self.base_url)?;
+        Ok(!is_azure_v1_path(url.path()))
+    }
+
+    fn azure_deployment(&self) -> Option<String> {
+        self.config
+            .azure_deployment_env
+            .and_then(|key| read_env_non_empty(key).ok().flatten())
+    }
+
+    fn azure_api_version(&self) -> Option<String> {
+        self.config
+            .azure_api_version_env
+            .and_then(|key| read_env_non_empty(key).ok().flatten())
+            .or_else(|| self.config.azure_default_api_version.map(ToOwned::to_owned))
     }
 }
 
@@ -631,7 +730,7 @@ struct ErrorBody {
     message: Option<String>,
 }
 
-fn build_chat_completion_request(request: &MessageRequest) -> Value {
+fn build_chat_completion_request(request: &MessageRequest, include_model: bool) -> Value {
     let mut messages = Vec::new();
     if let Some(system) = request.system.as_ref().filter(|value| !value.is_empty()) {
         messages.push(json!({
@@ -644,11 +743,13 @@ fn build_chat_completion_request(request: &MessageRequest) -> Value {
     }
 
     let mut payload = json!({
-        "model": request.model,
         "max_tokens": request.max_tokens,
         "messages": messages,
         "stream": request.stream,
     });
+    if include_model {
+        payload["model"] = json!(request.model);
+    }
 
     if let Some(tools) = &request.tools {
         payload["tools"] =
@@ -863,7 +964,16 @@ pub fn has_api_key(key: &str) -> bool {
 
 #[must_use]
 pub fn read_base_url(config: OpenAiCompatConfig) -> String {
-    std::env::var(config.base_url_env).unwrap_or_else(|_| config.default_base_url.to_string())
+    std::env::var(config.base_url_env)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            config
+                .fallback_base_url_env
+                .and_then(|key| std::env::var(key).ok())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_else(|| config.default_base_url.to_string())
 }
 
 fn chat_completions_endpoint(base_url: &str) -> String {
@@ -873,6 +983,58 @@ fn chat_completions_endpoint(base_url: &str) -> String {
     } else {
         format!("{trimmed}/chat/completions")
     }
+}
+
+fn azure_chat_completions_endpoint(
+    base_url: &str,
+    deployment: Option<String>,
+    api_version: Option<String>,
+) -> Result<String, ApiError> {
+    let mut url = parse_url(base_url)?;
+    let path = url.path().trim_end_matches('/').to_string();
+
+    let next_path = if path.ends_with("/chat/completions") {
+        path.clone()
+    } else if is_azure_v1_path(&path) {
+        format!("{path}/chat/completions")
+    } else if path == "/openai" || path.is_empty() {
+        let deployment = deployment.ok_or_else(|| {
+            ApiError::Configuration(
+                "Azure OpenAI deployment is required for legacy endpoints; set AZURE_OPENAI_DEPLOYMENT or use an /openai/v1 base URL".to_string(),
+            )
+        })?;
+        format!("/openai/deployments/{deployment}/chat/completions")
+    } else if path.contains("/openai/deployments/") {
+        format!("{path}/chat/completions")
+    } else {
+        let deployment = deployment.ok_or_else(|| {
+            ApiError::Configuration(
+                "Azure OpenAI deployment is required for legacy endpoints; set AZURE_OPENAI_DEPLOYMENT or use an /openai/v1 base URL".to_string(),
+            )
+        })?;
+        format!(
+            "{}/openai/deployments/{deployment}/chat/completions",
+            path.trim_end_matches('/')
+        )
+    };
+
+    url.set_path(&next_path);
+    if !is_azure_v1_path(&next_path) && !url.query_pairs().any(|(key, _)| key == "api-version") {
+        let version = api_version.unwrap_or_else(|| DEFAULT_AZURE_OPENAI_API_VERSION.to_string());
+        url.query_pairs_mut().append_pair("api-version", &version);
+    }
+    Ok(url.to_string())
+}
+
+fn is_azure_v1_path(path: &str) -> bool {
+    let trimmed = path.trim_end_matches('/');
+    trimmed == "/openai/v1" || trimmed.starts_with("/openai/v1/")
+}
+
+fn parse_url(base_url: &str) -> Result<Url, ApiError> {
+    Url::parse(base_url).map_err(|error| {
+        ApiError::Configuration(format!("invalid base URL {base_url:?}: {error}"))
+    })
 }
 
 fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
@@ -936,8 +1098,9 @@ impl StringExt for String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_chat_completion_request, chat_completions_endpoint, normalize_finish_reason,
-        openai_tool_choice, parse_tool_arguments, OpenAiCompatClient, OpenAiCompatConfig,
+        azure_chat_completions_endpoint, build_chat_completion_request, chat_completions_endpoint,
+        normalize_finish_reason, openai_tool_choice, parse_tool_arguments, OpenAiCompatClient,
+        OpenAiCompatConfig, DEFAULT_AZURE_OPENAI_API_VERSION,
     };
     use crate::error::ApiError;
     use crate::types::{
@@ -975,7 +1138,7 @@ mod tests {
             }]),
             tool_choice: Some(ToolChoice::Auto),
             stream: false,
-        });
+        }, true);
 
         assert_eq!(payload["messages"][0]["role"], json!("system"));
         assert_eq!(payload["messages"][1]["role"], json!("user"));
@@ -1035,6 +1198,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn azure_v1_endpoint_builder_appends_chat_completions() {
+        assert_eq!(
+            azure_chat_completions_endpoint(
+                "https://example.openai.azure.com/openai/v1/",
+                None,
+                None,
+            )
+            .expect("azure v1 endpoint should build"),
+            "https://example.openai.azure.com/openai/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn azure_legacy_endpoint_builder_uses_deployment_and_api_version() {
+        assert_eq!(
+            azure_chat_completions_endpoint(
+                "https://example.openai.azure.com",
+                Some("deploy-test"),
+                Some("2024-10-21"),
+            )
+            .expect("azure legacy endpoint should build"),
+            "https://example.openai.azure.com/openai/deployments/deploy-test/chat/completions?api-version=2024-10-21"
+        );
+    }
+
+    #[test]
+    fn azure_legacy_requests_omit_model_field() {
+        let payload = build_chat_completion_request(
+            &MessageRequest {
+                model: "gpt-4.1".to_string(),
+                max_tokens: 64,
+                messages: vec![InputMessage {
+                    role: "user".to_string(),
+                    content: vec![InputContentBlock::Text {
+                        text: "hello".to_string(),
+                    }],
+                }],
+                system: None,
+                tools: None,
+                tool_choice: None,
+                stream: false,
+            },
+            false,
+        );
+
+        assert!(payload.get("model").is_none());
+    }
+
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
@@ -1046,5 +1258,9 @@ mod tests {
     fn normalizes_stop_reasons() {
         assert_eq!(normalize_finish_reason("stop"), "end_turn");
         assert_eq!(normalize_finish_reason("tool_calls"), "tool_use");
+        assert_eq!(
+            DEFAULT_AZURE_OPENAI_API_VERSION,
+            "2024-10-21"
+        );
     }
 }

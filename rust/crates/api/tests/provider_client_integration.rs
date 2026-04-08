@@ -1,7 +1,10 @@
 use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
-use api::{read_xai_base_url, ApiError, AuthSource, ProviderClient, ProviderKind};
+use api::{
+    read_azure_openai_base_url, read_xai_base_url, ApiError, AuthSource, ProviderClient,
+    ProviderKind,
+};
 
 #[test]
 fn provider_client_routes_grok_aliases_through_xai() {
@@ -51,6 +54,55 @@ fn read_xai_base_url_prefers_env_override() {
     let _xai_base_url = EnvVarGuard::set("XAI_BASE_URL", Some("https://example.xai.test/v1"));
 
     assert_eq!(read_xai_base_url(), "https://example.xai.test/v1");
+}
+
+#[test]
+fn provider_client_routes_unknown_models_through_azure_when_configured() {
+    let _lock = env_lock();
+    let _openai_api_key = EnvVarGuard::set("OPENAI_API_KEY", None);
+    let _azure_api_key = EnvVarGuard::set("AZURE_OPENAI_API_KEY", Some("azure-test-key"));
+    let _azure_base_url = EnvVarGuard::set(
+        "AZURE_OPENAI_BASE_URL",
+        Some("https://example.openai.azure.com/openai/v1"),
+    );
+
+    let client = ProviderClient::from_model("gpt-4.1").expect("azure provider should resolve");
+
+    assert_eq!(client.provider_kind(), ProviderKind::AzureOpenAi);
+}
+
+#[test]
+fn provider_client_reports_missing_azure_configuration() {
+    let _lock = env_lock();
+    let _openai_api_key = EnvVarGuard::set("OPENAI_API_KEY", None);
+    let _azure_api_key = EnvVarGuard::set("AZURE_OPENAI_API_KEY", Some("azure-test-key"));
+    let _azure_base_url = EnvVarGuard::set("AZURE_OPENAI_BASE_URL", None);
+    let _azure_endpoint = EnvVarGuard::set("AZURE_OPENAI_ENDPOINT", None);
+
+    let error = ProviderClient::from_model("gpt-4.1")
+        .expect_err("missing azure base URL should fail fast");
+
+    match error {
+        ApiError::Configuration(message) => {
+            assert!(message.contains("AZURE_OPENAI_BASE_URL"));
+        }
+        other => panic!("expected azure configuration error, got {other:?}"),
+    }
+}
+
+#[test]
+fn read_azure_base_url_prefers_endpoint_fallback() {
+    let _lock = env_lock();
+    let _azure_base_url = EnvVarGuard::set("AZURE_OPENAI_BASE_URL", None);
+    let _azure_endpoint = EnvVarGuard::set(
+        "AZURE_OPENAI_ENDPOINT",
+        Some("https://example.openai.azure.com"),
+    );
+
+    assert_eq!(
+        read_azure_openai_base_url(),
+        "https://example.openai.azure.com"
+    );
 }
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {

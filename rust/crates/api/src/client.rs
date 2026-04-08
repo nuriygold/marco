@@ -23,6 +23,7 @@ pub enum ProviderClient {
     ClawApi(ClawApiClient),
     Xai(OpenAiCompatClient),
     OpenAi(OpenAiCompatClient),
+    AzureOpenAi(OpenAiCompatClient),
 }
 
 impl ProviderClient {
@@ -46,6 +47,9 @@ impl ProviderClient {
             ProviderKind::OpenAi => Ok(Self::OpenAi(OpenAiCompatClient::from_env(
                 OpenAiCompatConfig::openai(),
             )?)),
+            ProviderKind::AzureOpenAi => Ok(Self::AzureOpenAi(OpenAiCompatClient::from_env(
+                OpenAiCompatConfig::azure_openai(),
+            )?)),
         }
     }
 
@@ -55,6 +59,7 @@ impl ProviderClient {
             Self::ClawApi(_) => ProviderKind::ClawApi,
             Self::Xai(_) => ProviderKind::Xai,
             Self::OpenAi(_) => ProviderKind::OpenAi,
+            Self::AzureOpenAi(_) => ProviderKind::AzureOpenAi,
         }
     }
 
@@ -64,7 +69,9 @@ impl ProviderClient {
     ) -> Result<MessageResponse, ApiError> {
         match self {
             Self::ClawApi(client) => send_via_provider(client, request).await,
-            Self::Xai(client) | Self::OpenAi(client) => send_via_provider(client, request).await,
+            Self::Xai(client) | Self::OpenAi(client) | Self::AzureOpenAi(client) => {
+                send_via_provider(client, request).await
+            }
         }
     }
 
@@ -76,9 +83,11 @@ impl ProviderClient {
             Self::ClawApi(client) => stream_via_provider(client, request)
                 .await
                 .map(MessageStream::ClawApi),
-            Self::Xai(client) | Self::OpenAi(client) => stream_via_provider(client, request)
-                .await
-                .map(MessageStream::OpenAiCompat),
+            Self::Xai(client) | Self::OpenAi(client) | Self::AzureOpenAi(client) => {
+                stream_via_provider(client, request)
+                    .await
+                    .map(MessageStream::OpenAiCompat)
+            }
         }
     }
 }
@@ -117,6 +126,11 @@ pub fn read_base_url() -> String {
 #[must_use]
 pub fn read_xai_base_url() -> String {
     openai_compat::read_base_url(OpenAiCompatConfig::xai())
+}
+
+#[must_use]
+pub fn read_azure_openai_base_url() -> String {
+    openai_compat::read_base_url(OpenAiCompatConfig::azure_openai())
 }
 
 #[cfg(test)]

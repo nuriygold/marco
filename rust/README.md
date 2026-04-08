@@ -37,6 +37,20 @@ export XAI_API_KEY="..."
 export XAI_BASE_URL="https://api.x.ai"
 ```
 
+Azure OpenAI:
+
+```bash
+export AZURE_OPENAI_API_KEY="..."
+
+# Preferred for the Azure OpenAI v1 API
+export AZURE_OPENAI_BASE_URL="https://YOUR-RESOURCE.openai.azure.com/openai/v1"
+
+# Or use the resource endpoint directly for legacy deployment-based chat completions
+# export AZURE_OPENAI_ENDPOINT="https://YOUR-RESOURCE.openai.azure.com"
+# export AZURE_OPENAI_DEPLOYMENT="your-deployment-name"
+# export AZURE_OPENAI_API_VERSION="2024-10-21"
+```
+
 OAuth login is also available:
 
 ```bash

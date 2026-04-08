@@ -28,6 +28,7 @@ pub enum ProviderKind {
     ClawApi,
     Xai,
     OpenAi,
+    AzureOpenAi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,7 +161,7 @@ pub fn resolve_model_alias(model: &str) -> String {
                     "grok-2" => "grok-2",
                     _ => trimmed,
                 },
-                ProviderKind::OpenAi => trimmed,
+                ProviderKind::OpenAi | ProviderKind::AzureOpenAi => trimmed,
             })
         })
         .map_or_else(|| trimmed.to_string(), ToOwned::to_owned)
@@ -189,6 +190,11 @@ pub fn detect_provider_kind(model: &str) -> ProviderKind {
     if let Some(metadata) = metadata_for_model(model) {
         return metadata.provider;
     }
+    if openai_compat::has_api_key("AZURE_OPENAI_API_KEY")
+        && !openai_compat::has_api_key("OPENAI_API_KEY")
+    {
+        return ProviderKind::AzureOpenAi;
+    }
     if claw_provider::has_auth_from_env_or_saved().unwrap_or(false) {
         return ProviderKind::ClawApi;
     }
@@ -214,6 +220,40 @@ pub fn max_tokens_for_model(model: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{detect_provider_kind, max_tokens_for_model, resolve_model_alias, ProviderKind};
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let original = std::env::var_os(key);
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn resolves_grok_aliases() {
@@ -229,6 +269,14 @@ mod tests {
             detect_provider_kind("claude-sonnet-4-6"),
             ProviderKind::ClawApi
         );
+    }
+
+    #[test]
+    fn detects_azure_when_only_azure_credentials_are_available() {
+        let _lock = env_lock();
+        let _openai_api_key = EnvVarGuard::set("OPENAI_API_KEY", None);
+        let _azure_api_key = EnvVarGuard::set("AZURE_OPENAI_API_KEY", Some("azure-test-key"));
+        assert_eq!(detect_provider_kind("gpt-4.1"), ProviderKind::AzureOpenAi);
     }
 
     #[test]
