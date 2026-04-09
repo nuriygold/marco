@@ -281,7 +281,11 @@ impl OpenAiCompatClient {
 
     fn request_url(&self) -> Result<String, ApiError> {
         if self.config.is_azure() {
-            azure_chat_completions_endpoint(&self.base_url, self.azure_deployment(), self.azure_api_version())
+            azure_chat_completions_endpoint(
+                &self.base_url,
+                self.azure_deployment(),
+                self.azure_api_version(),
+            )
         } else {
             Ok(chat_completions_endpoint(&self.base_url))
         }
@@ -1032,9 +1036,8 @@ fn is_azure_v1_path(path: &str) -> bool {
 }
 
 fn parse_url(base_url: &str) -> Result<Url, ApiError> {
-    Url::parse(base_url).map_err(|error| {
-        ApiError::Configuration(format!("invalid base URL {base_url:?}: {error}"))
-    })
+    Url::parse(base_url)
+        .map_err(|error| ApiError::Configuration(format!("invalid base URL {base_url:?}: {error}")))
 }
 
 fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
@@ -1112,33 +1115,36 @@ mod tests {
 
     #[test]
     fn request_translation_uses_openai_compatible_shape() {
-        let payload = build_chat_completion_request(&MessageRequest {
-            model: "grok-3".to_string(),
-            max_tokens: 64,
-            messages: vec![InputMessage {
-                role: "user".to_string(),
-                content: vec![
-                    InputContentBlock::Text {
-                        text: "hello".to_string(),
-                    },
-                    InputContentBlock::ToolResult {
-                        tool_use_id: "tool_1".to_string(),
-                        content: vec![ToolResultContentBlock::Json {
-                            value: json!({"ok": true}),
-                        }],
-                        is_error: false,
-                    },
-                ],
-            }],
-            system: Some("be helpful".to_string()),
-            tools: Some(vec![ToolDefinition {
-                name: "weather".to_string(),
-                description: Some("Get weather".to_string()),
-                input_schema: json!({"type": "object"}),
-            }]),
-            tool_choice: Some(ToolChoice::Auto),
-            stream: false,
-        }, true);
+        let payload = build_chat_completion_request(
+            &MessageRequest {
+                model: "grok-3".to_string(),
+                max_tokens: 64,
+                messages: vec![InputMessage {
+                    role: "user".to_string(),
+                    content: vec![
+                        InputContentBlock::Text {
+                            text: "hello".to_string(),
+                        },
+                        InputContentBlock::ToolResult {
+                            tool_use_id: "tool_1".to_string(),
+                            content: vec![ToolResultContentBlock::Json {
+                                value: json!({"ok": true}),
+                            }],
+                            is_error: false,
+                        },
+                    ],
+                }],
+                system: Some("be helpful".to_string()),
+                tools: Some(vec![ToolDefinition {
+                    name: "weather".to_string(),
+                    description: Some("Get weather".to_string()),
+                    input_schema: json!({"type": "object"}),
+                }]),
+                tool_choice: Some(ToolChoice::Auto),
+                stream: false,
+            },
+            true,
+        );
 
         assert_eq!(payload["messages"][0]["role"], json!("system"));
         assert_eq!(payload["messages"][1]["role"], json!("user"));
@@ -1216,8 +1222,8 @@ mod tests {
         assert_eq!(
             azure_chat_completions_endpoint(
                 "https://example.openai.azure.com",
-                Some("deploy-test"),
-                Some("2024-10-21"),
+                Some("deploy-test".to_string()),
+                Some("2024-10-21".to_string()),
             )
             .expect("azure legacy endpoint should build"),
             "https://example.openai.azure.com/openai/deployments/deploy-test/chat/completions?api-version=2024-10-21"
@@ -1258,9 +1264,6 @@ mod tests {
     fn normalizes_stop_reasons() {
         assert_eq!(normalize_finish_reason("stop"), "end_turn");
         assert_eq!(normalize_finish_reason("tool_calls"), "tool_use");
-        assert_eq!(
-            DEFAULT_AZURE_OPENAI_API_VERSION,
-            "2024-10-21"
-        );
+        assert_eq!(DEFAULT_AZURE_OPENAI_API_VERSION, "2024-10-21");
     }
 }

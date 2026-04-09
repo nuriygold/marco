@@ -79,8 +79,8 @@ fn provider_client_reports_missing_azure_configuration() {
     let _azure_base_url = EnvVarGuard::set("AZURE_OPENAI_BASE_URL", None);
     let _azure_endpoint = EnvVarGuard::set("AZURE_OPENAI_ENDPOINT", None);
 
-    let error = ProviderClient::from_model("gpt-4.1")
-        .expect_err("missing azure base URL should fail fast");
+    let error =
+        ProviderClient::from_model("gpt-4.1").expect_err("missing azure base URL should fail fast");
 
     match error {
         ApiError::Configuration(message) => {

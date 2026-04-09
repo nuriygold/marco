@@ -34,9 +34,10 @@ use runtime::{
     clear_oauth_credentials, generate_pkce_pair, generate_state, load_system_prompt,
     parse_oauth_callback_request_target, save_oauth_credentials, ApiClient, ApiRequest,
     AssistantEvent, CompactionConfig, ConfigLoader, ConfigSource, ContentBlock,
-    ConversationMessage, ConversationRuntime, MessageRole, OAuthAuthorizationRequest, OAuthConfig,
-    OAuthTokenExchangeRequest, PermissionMode, PermissionPolicy, ProjectContext, RuntimeError,
-    Session, TokenUsage, ToolError, ToolExecutor, UsageTracker,
+    ConversationMessage, ConversationRuntime, ExplicitContextSource, MessageRole,
+    OAuthAuthorizationRequest, OAuthConfig, OAuthTokenExchangeRequest, PermissionMode,
+    PermissionPolicy, ProjectContext, RuntimeError, Session, TokenUsage, ToolError, ToolExecutor,
+    UsageTracker,
 };
 use serde_json::json;
 use tools::GlobalToolRegistry;
@@ -86,7 +87,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::BootstrapPlan => print_bootstrap_plan(),
         CliAction::Agents { args } => LiveCli::print_agents(args.as_deref())?,
         CliAction::Skills { args } => LiveCli::print_skills(args.as_deref())?,
-        CliAction::PrintSystemPrompt { cwd, date } => print_system_prompt(cwd, date),
+        CliAction::PrintSystemPrompt {
+            cwd,
+            date,
+            context_sources,
+        } => print_system_prompt(cwd, date, context_sources),
         CliAction::Version => print_version(),
         CliAction::ResumeSession {
             session_path,
@@ -98,7 +103,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             output_format,
             allowed_tools,
             permission_mode,
-        } => LiveCli::new(model, true, allowed_tools, permission_mode)?
+            context_sources,
+        } => LiveCli::new(model, true, allowed_tools, permission_mode, context_sources)?
             .run_turn_with_output(&prompt, output_format)?,
         CliAction::Login => run_login()?,
         CliAction::Logout => run_logout()?,
@@ -107,7 +113,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model,
             allowed_tools,
             permission_mode,
-        } => run_repl(model, allowed_tools, permission_mode)?,
+            context_sources,
+        } => run_repl(model, allowed_tools, permission_mode, context_sources)?,
         CliAction::Help => print_help(),
     }
     Ok(())
@@ -126,6 +133,7 @@ enum CliAction {
     PrintSystemPrompt {
         cwd: PathBuf,
         date: String,
+        context_sources: Vec<ExplicitContextSource>,
     },
     Version,
     ResumeSession {
@@ -138,6 +146,7 @@ enum CliAction {
         output_format: CliOutputFormat,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
+        context_sources: Vec<ExplicitContextSource>,
     },
     Login,
     Logout,
@@ -146,6 +155,7 @@ enum CliAction {
         model: String,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
+        context_sources: Vec<ExplicitContextSource>,
     },
     // prompt-mode formatting is only supported for non-interactive runs
     Help,
@@ -176,6 +186,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut permission_mode = default_permission_mode();
     let mut wants_version = false;
     let mut allowed_tool_values = Vec::new();
+    let mut context_sources = Vec::new();
     let mut rest = Vec::new();
     let mut index = 0;
 
@@ -234,6 +245,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     output_format,
                     allowed_tools: normalize_allowed_tools(&allowed_tool_values)?,
                     permission_mode,
+                    context_sources,
                 });
             }
             "--print" => {
@@ -256,6 +268,28 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 allowed_tool_values.push(flag[16..].to_string());
                 index += 1;
             }
+            "--context-file" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --context-file".to_string())?;
+                context_sources.push(ExplicitContextSource::File(PathBuf::from(value)));
+                index += 2;
+            }
+            flag if flag.starts_with("--context-file=") => {
+                context_sources.push(ExplicitContextSource::File(PathBuf::from(&flag[15..])));
+                index += 1;
+            }
+            "--context-dir" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --context-dir".to_string())?;
+                context_sources.push(ExplicitContextSource::Dir(PathBuf::from(value)));
+                index += 2;
+            }
+            flag if flag.starts_with("--context-dir=") => {
+                context_sources.push(ExplicitContextSource::Dir(PathBuf::from(&flag[14..])));
+                index += 1;
+            }
             other => {
                 rest.push(other.to_string());
                 index += 1;
@@ -274,6 +308,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             model,
             allowed_tools,
             permission_mode,
+            context_sources,
         });
     }
     if matches!(rest.first().map(String::as_str), Some("--help" | "-h")) {
@@ -292,23 +327,18 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         "skills" => Ok(CliAction::Skills {
             args: join_optional_args(&rest[1..]),
         }),
-        "system-prompt" => parse_system_prompt_args(&rest[1..]),
+        "system-prompt" => parse_system_prompt_args(&rest[1..], context_sources),
         "login" => Ok(CliAction::Login),
         "logout" => Ok(CliAction::Logout),
         "init" => Ok(CliAction::Init),
-        "prompt" => {
-            let prompt = rest[1..].join(" ");
-            if prompt.trim().is_empty() {
-                return Err("prompt subcommand requires a prompt string".to_string());
-            }
-            Ok(CliAction::Prompt {
-                prompt,
-                model,
-                output_format,
-                allowed_tools,
-                permission_mode,
-            })
-        }
+        "prompt" => parse_prompt_args(
+            &rest[1..],
+            model,
+            output_format,
+            allowed_tools,
+            permission_mode,
+            context_sources,
+        ),
         other if other.starts_with('/') => parse_direct_slash_cli_action(&rest),
         _other => Ok(CliAction::Prompt {
             prompt: rest.join(" "),
@@ -316,6 +346,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             output_format,
             allowed_tools,
             permission_mode,
+            context_sources,
         }),
     }
 }
@@ -372,7 +403,13 @@ fn resolve_model_alias(model: &str) -> &str {
 }
 
 fn normalize_allowed_tools(values: &[String]) -> Result<Option<AllowedToolSet>, String> {
-    current_tool_registry()?.normalize_allowed_tools(values)
+    if values.is_empty() {
+        return Ok(None);
+    }
+    match current_tool_registry() {
+        Ok(registry) => registry.normalize_allowed_tools(values),
+        Err(_) => GlobalToolRegistry::builtin().normalize_allowed_tools(values),
+    }
 }
 
 fn current_tool_registry() -> Result<GlobalToolRegistry, String> {
@@ -420,7 +457,70 @@ fn filter_tool_specs(
     tool_registry.definitions(allowed_tools)
 }
 
-fn parse_system_prompt_args(args: &[String]) -> Result<CliAction, String> {
+fn parse_prompt_args(
+    args: &[String],
+    model: String,
+    output_format: CliOutputFormat,
+    allowed_tools: Option<AllowedToolSet>,
+    permission_mode: PermissionMode,
+    mut context_sources: Vec<ExplicitContextSource>,
+) -> Result<CliAction, String> {
+    let mut prompt_words = Vec::new();
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--context-file" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --context-file".to_string())?;
+                context_sources.push(ExplicitContextSource::File(PathBuf::from(value)));
+                index += 2;
+            }
+            flag if flag.starts_with("--context-file=") => {
+                context_sources.push(ExplicitContextSource::File(PathBuf::from(&flag[15..])));
+                index += 1;
+            }
+            "--context-dir" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --context-dir".to_string())?;
+                context_sources.push(ExplicitContextSource::Dir(PathBuf::from(value)));
+                index += 2;
+            }
+            flag if flag.starts_with("--context-dir=") => {
+                context_sources.push(ExplicitContextSource::Dir(PathBuf::from(&flag[14..])));
+                index += 1;
+            }
+            other if other.starts_with("--") => {
+                return Err(format!("unknown prompt option: {other}"));
+            }
+            other => {
+                prompt_words.push(other.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    let prompt = prompt_words.join(" ");
+    if prompt.trim().is_empty() {
+        return Err("prompt subcommand requires a prompt string".to_string());
+    }
+
+    Ok(CliAction::Prompt {
+        prompt,
+        model,
+        output_format,
+        allowed_tools,
+        permission_mode,
+        context_sources,
+    })
+}
+
+fn parse_system_prompt_args(
+    args: &[String],
+    mut context_sources: Vec<ExplicitContextSource>,
+) -> Result<CliAction, String> {
     let mut cwd = env::current_dir().map_err(|error| error.to_string())?;
     let mut date = DEFAULT_DATE.to_string();
     let mut index = 0;
@@ -441,11 +541,37 @@ fn parse_system_prompt_args(args: &[String]) -> Result<CliAction, String> {
                 date.clone_from(value);
                 index += 2;
             }
+            "--context-file" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --context-file".to_string())?;
+                context_sources.push(ExplicitContextSource::File(PathBuf::from(value)));
+                index += 2;
+            }
+            flag if flag.starts_with("--context-file=") => {
+                context_sources.push(ExplicitContextSource::File(PathBuf::from(&flag[15..])));
+                index += 1;
+            }
+            "--context-dir" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --context-dir".to_string())?;
+                context_sources.push(ExplicitContextSource::Dir(PathBuf::from(value)));
+                index += 2;
+            }
+            flag if flag.starts_with("--context-dir=") => {
+                context_sources.push(ExplicitContextSource::Dir(PathBuf::from(&flag[14..])));
+                index += 1;
+            }
             other => return Err(format!("unknown system-prompt option: {other}")),
         }
     }
 
-    Ok(CliAction::PrintSystemPrompt { cwd, date })
+    Ok(CliAction::PrintSystemPrompt {
+        cwd,
+        date,
+        context_sources,
+    })
 }
 
 fn parse_resume_args(args: &[String]) -> Result<CliAction, String> {
@@ -615,8 +741,8 @@ fn wait_for_oauth_callback(
     Ok(callback)
 }
 
-fn print_system_prompt(cwd: PathBuf, date: String) {
-    match load_system_prompt(cwd, date, env::consts::OS, "unknown") {
+fn print_system_prompt(cwd: PathBuf, date: String, context_sources: Vec<ExplicitContextSource>) {
+    match load_system_prompt(cwd, date, env::consts::OS, "unknown", &context_sources) {
         Ok(sections) => println!("{}", sections.join("\n\n")),
         Err(error) => {
             eprintln!("failed to build system prompt: {error}");
@@ -927,7 +1053,7 @@ fn run_resume_command(
                         estimated_tokens: 0,
                     },
                     default_permission_mode().as_str(),
-                    &status_context(Some(session_path))?,
+                    &status_context(Some(session_path), &[])?,
                 )),
             })
         }
@@ -944,7 +1070,7 @@ fn run_resume_command(
         }),
         SlashCommand::Memory => Ok(ResumeCommandOutcome {
             session: session.clone(),
-            message: Some(render_memory_report()?),
+            message: Some(render_memory_report(&[])?),
         }),
         SlashCommand::Init => Ok(ResumeCommandOutcome {
             session: session.clone(),
@@ -1007,8 +1133,9 @@ fn run_repl(
     model: String,
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
+    context_sources: Vec<ExplicitContextSource>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode)?;
+    let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode, context_sources)?;
     let mut editor = input::LineEditor::new("> ", slash_command_completion_candidates());
     println!("{}", cli.startup_banner());
 
@@ -1061,6 +1188,7 @@ struct LiveCli {
     model: String,
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
+    context_sources: Vec<ExplicitContextSource>,
     system_prompt: Vec<String>,
     runtime: ConversationRuntime<DefaultRuntimeClient, CliToolExecutor>,
     session: SessionHandle,
@@ -1072,8 +1200,9 @@ impl LiveCli {
         enable_tools: bool,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
+        context_sources: Vec<ExplicitContextSource>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let system_prompt = build_system_prompt()?;
+        let system_prompt = build_system_prompt(&context_sources)?;
         let session = create_managed_session_handle()?;
         let runtime = build_runtime(
             Session::new(),
@@ -1089,6 +1218,7 @@ impl LiveCli {
             model,
             allowed_tools,
             permission_mode,
+            context_sources,
             system_prompt,
             runtime,
             session,
@@ -1109,7 +1239,7 @@ impl LiveCli {
             .and_then(|path| path.file_name())
             .and_then(|name| name.to_str())
             .unwrap_or("workspace");
-        let git_branch = status_context(Some(&self.session.path))
+        let git_branch = status_context(Some(&self.session.path), &self.context_sources)
             .ok()
             .and_then(|context| context.git_branch);
         let workspace_summary = git_branch.as_deref().map_or_else(
@@ -1295,7 +1425,7 @@ impl LiveCli {
                 false
             }
             SlashCommand::Memory => {
-                Self::print_memory()?;
+                self.print_memory()?;
                 false
             }
             SlashCommand::Init => {
@@ -1376,7 +1506,8 @@ impl LiveCli {
                     estimated_tokens: self.runtime.estimated_tokens(),
                 },
                 self.permission_mode.as_str(),
-                &status_context(Some(&self.session.path)).expect("status context should load"),
+                &status_context(Some(&self.session.path), &self.context_sources)
+                    .expect("status context should load"),
             )
         );
     }
@@ -1544,8 +1675,8 @@ impl LiveCli {
         Ok(())
     }
 
-    fn print_memory() -> Result<(), Box<dyn std::error::Error>> {
-        println!("{}", render_memory_report()?);
+    fn print_memory(&self) -> Result<(), Box<dyn std::error::Error>> {
+        println!("{}", render_memory_report(&self.context_sources)?);
         Ok(())
     }
 
@@ -2044,12 +2175,14 @@ fn render_mode_unavailable(command: &str, label: &str) -> String {
 
 fn status_context(
     session_path: Option<&Path>,
+    context_sources: &[ExplicitContextSource],
 ) -> Result<StatusContext, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
     let loader = ConfigLoader::default_for(&cwd);
     let discovered_config_files = loader.discover().len();
     let runtime_config = loader.load()?;
-    let project_context = ProjectContext::discover_with_git(&cwd, DEFAULT_DATE)?;
+    let project_context =
+        ProjectContext::discover_with_git_and_explicit(&cwd, DEFAULT_DATE, context_sources)?;
     let (project_root, git_branch) =
         parse_git_status_metadata(project_context.git_status.as_deref());
     Ok(StatusContext {
@@ -2057,7 +2190,8 @@ fn status_context(
         session_path: session_path.map(Path::to_path_buf),
         loaded_config_files: runtime_config.loaded_entries().len(),
         discovered_config_files,
-        memory_file_count: project_context.instruction_files.len(),
+        memory_file_count: project_context.instruction_files.len()
+            + project_context.explicit_context_files.len(),
         project_root,
         git_branch,
     })
@@ -2207,20 +2341,46 @@ fn render_config_report(section: Option<&str>) -> Result<String, Box<dyn std::er
     ))
 }
 
-fn render_memory_report() -> Result<String, Box<dyn std::error::Error>> {
+fn render_memory_report(
+    context_sources: &[ExplicitContextSource],
+) -> Result<String, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
-    let project_context = ProjectContext::discover(&cwd, DEFAULT_DATE)?;
+    let project_context =
+        ProjectContext::discover_with_explicit(&cwd, DEFAULT_DATE, context_sources)?;
+    let total_instruction_files =
+        project_context.instruction_files.len() + project_context.explicit_context_files.len();
     let mut lines = vec![format!(
         "Memory
   Working directory {}
   Instruction files {}",
         cwd.display(),
-        project_context.instruction_files.len()
+        total_instruction_files
     )];
+    if project_context.explicit_context_files.is_empty() {
+        lines.push("Explicit files".to_string());
+        lines.push("  No explicit context files requested.".to_string());
+    } else {
+        lines.push("Explicit files".to_string());
+        for (index, file) in project_context.explicit_context_files.iter().enumerate() {
+            let preview = file.content.lines().next().unwrap_or("").trim();
+            let preview = if preview.is_empty() {
+                "<empty>"
+            } else {
+                preview
+            };
+            lines.push(format!("  {}. {}", index + 1, file.path.display()));
+            lines.push(format!(
+                "     lines={} preview={}",
+                file.content.lines().count(),
+                preview
+            ));
+        }
+    }
     if project_context.instruction_files.is_empty() {
         lines.push("Discovered files".to_string());
         lines.push(
-            "  No CLAW instruction files discovered in the current directory ancestry.".to_string(),
+            "  No project instruction files discovered in the current directory ancestry."
+                .to_string(),
         );
     } else {
         lines.push("Discovered files".to_string());
@@ -2578,12 +2738,15 @@ fn resolve_export_path(
     Ok(cwd.join(final_name))
 }
 
-fn build_system_prompt() -> Result<Vec<String>, Box<dyn std::error::Error>> {
+fn build_system_prompt(
+    context_sources: &[ExplicitContextSource],
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     Ok(load_system_prompt(
         env::current_dir()?,
         DEFAULT_DATE,
         env::consts::OS,
         "unknown",
+        context_sources,
     )?)
 }
 
@@ -3978,6 +4141,10 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     )?;
     writeln!(
         out,
+        "  claw --context-file NOTES.md \"summarize my priorities\""
+    )?;
+    writeln!(
+        out,
         "  claw --resume SESSION.json /status    Inspect a saved session"
     )?;
     writeln!(out)?;
@@ -4028,7 +4195,10 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         out,
         "  claw skills                           List installed skills"
     )?;
-    writeln!(out, "  claw system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
+    writeln!(
+        out,
+        "  claw system-prompt [--cwd PATH] [--date YYYY-MM-DD] [--context-file PATH] [--context-dir PATH]"
+    )?;
     writeln!(
         out,
         "  claw login                            Start the OAuth login flow"
@@ -4065,6 +4235,14 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     )?;
     writeln!(
         out,
+        "  --context-file PATH                   Add an explicit Markdown/text context file (repeatable)"
+    )?;
+    writeln!(
+        out,
+        "  --context-dir PATH                    Add standard instruction files from another directory tree"
+    )?;
+    writeln!(
+        out,
         "  --version, -V                         Print version and build information"
     )?;
     writeln!(out)?;
@@ -4089,6 +4267,10 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(
         out,
         "  claw --allowedTools read,glob \"summarize Cargo.toml\""
+    )?;
+    writeln!(
+        out,
+        "  claw --context-file ~/.claude/auto-memory/MEMORY.md \"summarize my priorities\""
     )?;
     writeln!(
         out,
@@ -4121,7 +4303,10 @@ mod tests {
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{PluginTool, PluginToolDefinition, PluginToolPermission};
-    use runtime::{AssistantEvent, ContentBlock, ConversationMessage, MessageRole, PermissionMode};
+    use runtime::{
+        AssistantEvent, ContentBlock, ConversationMessage, ExplicitContextSource, MessageRole,
+        PermissionMode,
+    };
     use serde_json::json;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -4159,6 +4344,7 @@ mod tests {
                 model: DEFAULT_MODEL.to_string(),
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
+                context_sources: Vec::new(),
             }
         );
     }
@@ -4178,6 +4364,7 @@ mod tests {
                 output_format: CliOutputFormat::Text,
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
+                context_sources: Vec::new(),
             }
         );
     }
@@ -4199,6 +4386,7 @@ mod tests {
                 output_format: CliOutputFormat::Json,
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
+                context_sources: Vec::new(),
             }
         );
     }
@@ -4219,6 +4407,7 @@ mod tests {
                 output_format: CliOutputFormat::Text,
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
+                context_sources: Vec::new(),
             }
         );
     }
@@ -4252,6 +4441,7 @@ mod tests {
                 model: DEFAULT_MODEL.to_string(),
                 allowed_tools: None,
                 permission_mode: PermissionMode::ReadOnly,
+                context_sources: Vec::new(),
             }
         );
     }
@@ -4274,6 +4464,7 @@ mod tests {
                         .collect()
                 ),
                 permission_mode: PermissionMode::DangerFullAccess,
+                context_sources: Vec::new(),
             }
         );
     }
@@ -4299,6 +4490,57 @@ mod tests {
             CliAction::PrintSystemPrompt {
                 cwd: PathBuf::from("/tmp/project"),
                 date: "2026-04-01".to_string(),
+                context_sources: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_repeatable_context_file_flags() {
+        let args = vec![
+            "--context-file".to_string(),
+            "docs/one.md".to_string(),
+            "--context-file=docs/two.md".to_string(),
+            "summarize".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Prompt {
+                prompt: "summarize".to_string(),
+                model: DEFAULT_MODEL.to_string(),
+                output_format: CliOutputFormat::Text,
+                allowed_tools: None,
+                permission_mode: PermissionMode::DangerFullAccess,
+                context_sources: vec![
+                    ExplicitContextSource::File(PathBuf::from("docs/one.md")),
+                    ExplicitContextSource::File(PathBuf::from("docs/two.md")),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn parses_prompt_subcommand_context_flags() {
+        let args = vec![
+            "prompt".to_string(),
+            "--context-dir".to_string(),
+            "/tmp/memory".to_string(),
+            "--context-file".to_string(),
+            "notes.md".to_string(),
+            "summarize".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Prompt {
+                prompt: "summarize".to_string(),
+                model: DEFAULT_MODEL.to_string(),
+                output_format: CliOutputFormat::Text,
+                allowed_tools: None,
+                permission_mode: PermissionMode::DangerFullAccess,
+                context_sources: vec![
+                    ExplicitContextSource::Dir(PathBuf::from("/tmp/memory")),
+                    ExplicitContextSource::File(PathBuf::from("notes.md")),
+                ],
             }
         );
     }
@@ -4640,10 +4882,11 @@ mod tests {
 
     #[test]
     fn memory_report_uses_sectioned_layout() {
-        let report = render_memory_report().expect("memory report should render");
+        let report = render_memory_report(&[]).expect("memory report should render");
         assert!(report.contains("Memory"));
         assert!(report.contains("Working directory"));
         assert!(report.contains("Instruction files"));
+        assert!(report.contains("Explicit files"));
         assert!(report.contains("Discovered files"));
     }
 
@@ -4667,7 +4910,7 @@ mod tests {
 
     #[test]
     fn status_context_reads_real_workspace_metadata() {
-        let context = status_context(None).expect("status context should load");
+        let context = status_context(None, &[]).expect("status context should load");
         assert!(context.cwd.is_absolute());
         assert_eq!(context.discovered_config_files, 5);
         assert!(context.loaded_config_files <= context.discovered_config_files);

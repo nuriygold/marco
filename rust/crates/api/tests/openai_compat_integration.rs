@@ -246,11 +246,8 @@ async fn azure_openai_v1_uses_api_key_header_and_v1_path() {
     )
     .await;
 
-    let client = OpenAiCompatClient::new(
-        "azure-test-key",
-        OpenAiCompatConfig::azure_openai(),
-    )
-    .with_base_url(format!("{}/openai/v1", server.base_url()));
+    let client = OpenAiCompatClient::new("azure-test-key", OpenAiCompatConfig::azure_openai())
+        .with_base_url(format!("{}/openai/v1", server.base_url()));
     let response = client
         .send_message(&sample_request(false))
         .await
@@ -266,8 +263,7 @@ async fn azure_openai_v1_uses_api_key_header_and_v1_path() {
         Some("azure-test-key")
     );
     assert!(
-        serde_json::from_str::<serde_json::Value>(&request.body)
-            .expect("json body")["model"]
+        serde_json::from_str::<serde_json::Value>(&request.body).expect("json body")["model"]
             .is_string()
     );
 }
@@ -289,11 +285,8 @@ async fn azure_openai_legacy_uses_deployment_path_and_api_version() {
     )
     .await;
 
-    let client = OpenAiCompatClient::new(
-        "azure-test-key",
-        OpenAiCompatConfig::azure_openai(),
-    )
-    .with_base_url(server.base_url());
+    let client = OpenAiCompatClient::new("azure-test-key", OpenAiCompatConfig::azure_openai())
+        .with_base_url(server.base_url());
     let response = client
         .send_message(&sample_request(false))
         .await
