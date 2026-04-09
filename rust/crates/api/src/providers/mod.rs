@@ -174,6 +174,22 @@ pub fn metadata_for_model(model: &str) -> Option<ProviderMetadata> {
     if let Some((_, metadata)) = MODEL_REGISTRY.iter().find(|(alias, _)| *alias == lower) {
         return Some(*metadata);
     }
+    if is_openai_family_model(&lower) {
+        if openai_compat::has_api_key("AZURE_OPENAI_API_KEY") {
+            return Some(ProviderMetadata {
+                provider: ProviderKind::AzureOpenAi,
+                auth_env: "AZURE_OPENAI_API_KEY",
+                base_url_env: "AZURE_OPENAI_BASE_URL",
+                default_base_url: "",
+            });
+        }
+        return Some(ProviderMetadata {
+            provider: ProviderKind::OpenAi,
+            auth_env: "OPENAI_API_KEY",
+            base_url_env: "OPENAI_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_OPENAI_BASE_URL,
+        });
+    }
     if lower.starts_with("grok") {
         return Some(ProviderMetadata {
             provider: ProviderKind::Xai,
@@ -205,6 +221,14 @@ pub fn detect_provider_kind(model: &str) -> ProviderKind {
         return ProviderKind::Xai;
     }
     ProviderKind::ClawApi
+}
+
+fn is_openai_family_model(model: &str) -> bool {
+    model.starts_with("gpt-")
+        || model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+        || model.starts_with("chatgpt")
 }
 
 #[must_use]
@@ -277,6 +301,24 @@ mod tests {
         let _openai_api_key = EnvVarGuard::set("OPENAI_API_KEY", None);
         let _azure_api_key = EnvVarGuard::set("AZURE_OPENAI_API_KEY", Some("azure-test-key"));
         assert_eq!(detect_provider_kind("gpt-4.1"), ProviderKind::AzureOpenAi);
+    }
+
+    #[test]
+    fn detects_openai_family_models_without_falling_back_to_claw() {
+        let _lock = env_lock();
+        let _anthropic_api_key = EnvVarGuard::set("ANTHROPIC_API_KEY", Some("claw-test-key"));
+        let _openai_api_key = EnvVarGuard::set("OPENAI_API_KEY", Some("openai-test-key"));
+        let _azure_api_key = EnvVarGuard::set("AZURE_OPENAI_API_KEY", None);
+        assert_eq!(detect_provider_kind("gpt-5.4-mini"), ProviderKind::OpenAi);
+    }
+
+    #[test]
+    fn openai_family_models_prefer_azure_when_available() {
+        let _lock = env_lock();
+        let _anthropic_api_key = EnvVarGuard::set("ANTHROPIC_API_KEY", Some("claw-test-key"));
+        let _openai_api_key = EnvVarGuard::set("OPENAI_API_KEY", Some("openai-test-key"));
+        let _azure_api_key = EnvVarGuard::set("AZURE_OPENAI_API_KEY", Some("azure-test-key"));
+        assert_eq!(detect_provider_kind("gpt-5.4-mini"), ProviderKind::AzureOpenAi);
     }
 
     #[test]
