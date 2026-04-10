@@ -235,6 +235,7 @@ impl OpenAiCompatClient {
     ) -> Result<reqwest::Response, ApiError> {
         let request_url = self.request_url()?;
         let use_model_field = !self.uses_azure_legacy_endpoint()?;
+        let max_tokens_field = self.max_tokens_field()?;
         let request_builder = self
             .http
             .post(&request_url)
@@ -244,7 +245,11 @@ impl OpenAiCompatClient {
             AuthHeaderKind::ApiKey => request_builder.header("api-key", &self.api_key),
         };
         request_builder
-            .json(&build_chat_completion_request(request, use_model_field))
+            .json(&build_chat_completion_request(
+                request,
+                use_model_field,
+                max_tokens_field,
+            ))
             .send()
             .await
             .map_err(ApiError::from)
@@ -297,6 +302,14 @@ impl OpenAiCompatClient {
         }
         let url = parse_url(&self.base_url)?;
         Ok(!is_azure_v1_path(url.path()))
+    }
+
+    fn max_tokens_field(&self) -> Result<MaxTokensField, ApiError> {
+        if self.config.is_azure() {
+            return Ok(MaxTokensField::MaxCompletionTokens);
+        }
+
+        Ok(MaxTokensField::MaxTokens)
     }
 
     fn azure_deployment(&self) -> Option<String> {
@@ -734,7 +747,17 @@ struct ErrorBody {
     message: Option<String>,
 }
 
-fn build_chat_completion_request(request: &MessageRequest, include_model: bool) -> Value {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MaxTokensField {
+    MaxTokens,
+    MaxCompletionTokens,
+}
+
+fn build_chat_completion_request(
+    request: &MessageRequest,
+    include_model: bool,
+    max_tokens_field: MaxTokensField,
+) -> Value {
     let mut messages = Vec::new();
     if let Some(system) = request.system.as_ref().filter(|value| !value.is_empty()) {
         messages.push(json!({
@@ -747,10 +770,10 @@ fn build_chat_completion_request(request: &MessageRequest, include_model: bool) 
     }
 
     let mut payload = json!({
-        "max_tokens": request.max_tokens,
         "messages": messages,
         "stream": request.stream,
     });
+    payload[max_tokens_field.as_wire_name()] = json!(request.max_tokens);
     if include_model {
         payload["model"] = json!(request.model);
     }
@@ -764,6 +787,15 @@ fn build_chat_completion_request(request: &MessageRequest, include_model: bool) 
     }
 
     payload
+}
+
+impl MaxTokensField {
+    const fn as_wire_name(self) -> &'static str {
+        match self {
+            Self::MaxTokens => "max_tokens",
+            Self::MaxCompletionTokens => "max_completion_tokens",
+        }
+    }
 }
 
 fn translate_message(message: &InputMessage) -> Vec<Value> {
@@ -1102,8 +1134,8 @@ impl StringExt for String {
 mod tests {
     use super::{
         azure_chat_completions_endpoint, build_chat_completion_request, chat_completions_endpoint,
-        normalize_finish_reason, openai_tool_choice, parse_tool_arguments, OpenAiCompatClient,
-        OpenAiCompatConfig, DEFAULT_AZURE_OPENAI_API_VERSION,
+        normalize_finish_reason, openai_tool_choice, parse_tool_arguments, MaxTokensField,
+        OpenAiCompatClient, OpenAiCompatConfig, DEFAULT_AZURE_OPENAI_API_VERSION,
     };
     use crate::error::ApiError;
     use crate::types::{
@@ -1144,8 +1176,11 @@ mod tests {
                 stream: false,
             },
             true,
+            MaxTokensField::MaxTokens,
         );
 
+        assert_eq!(payload["max_tokens"], json!(64));
+        assert!(payload.get("max_completion_tokens").is_none());
         assert_eq!(payload["messages"][0]["role"], json!("system"));
         assert_eq!(payload["messages"][1]["role"], json!("user"));
         assert_eq!(payload["messages"][2]["role"], json!("tool"));
@@ -1248,9 +1283,12 @@ mod tests {
                 stream: false,
             },
             false,
+            MaxTokensField::MaxCompletionTokens,
         );
 
         assert!(payload.get("model").is_none());
+        assert_eq!(payload["max_completion_tokens"], json!(64));
+        assert!(payload.get("max_tokens").is_none());
     }
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {

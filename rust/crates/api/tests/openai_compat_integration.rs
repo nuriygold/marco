@@ -58,6 +58,8 @@ async fn send_message_uses_openai_compatible_endpoint_and_auth() {
     );
     let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
     assert_eq!(body["model"], json!("grok-3"));
+    assert_eq!(body["max_tokens"], json!(64));
+    assert!(body.get("max_completion_tokens").is_none());
     assert_eq!(body["messages"][0]["role"], json!("system"));
     assert_eq!(body["tools"][0]["type"], json!("function"));
 }
@@ -266,6 +268,9 @@ async fn azure_openai_v1_uses_api_key_header_and_v1_path() {
         serde_json::from_str::<serde_json::Value>(&request.body).expect("json body")["model"]
             .is_string()
     );
+    let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
+    assert_eq!(body["max_completion_tokens"], json!(64));
+    assert!(body.get("max_tokens").is_none());
 }
 
 #[tokio::test]
@@ -306,6 +311,8 @@ async fn azure_openai_legacy_uses_deployment_path_and_api_version() {
     );
     let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
     assert!(body.get("model").is_none());
+    assert_eq!(body["max_completion_tokens"], json!(64));
+    assert!(body.get("max_tokens").is_none());
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
