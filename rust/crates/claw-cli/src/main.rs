@@ -47,6 +47,13 @@ const DEFAULT_MODEL: &str = "claude-opus-4-6";
 fn max_tokens_for_model(model: &str) -> u32 {
     if model.contains("opus") {
         32_000
+    } else if model.starts_with("gpt-")
+        || model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+        || model.starts_with("chatgpt")
+    {
+        32_768
     } else {
         64_000
     }

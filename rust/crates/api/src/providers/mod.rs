@@ -236,6 +236,8 @@ pub fn max_tokens_for_model(model: &str) -> u32 {
     let canonical = resolve_model_alias(model);
     if canonical.contains("opus") {
         32_000
+    } else if is_openai_family_model(&canonical) {
+        32_768
     } else {
         64_000
     }
@@ -324,6 +326,8 @@ mod tests {
     #[test]
     fn keeps_existing_max_token_heuristic() {
         assert_eq!(max_tokens_for_model("opus"), 32_000);
+        assert_eq!(max_tokens_for_model("gpt-4.1"), 32_768);
+        assert_eq!(max_tokens_for_model("gpt-5.4-mini"), 32_768);
         assert_eq!(max_tokens_for_model("grok-3"), 64_000);
     }
 }
