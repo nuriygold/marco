@@ -820,11 +820,14 @@ fn translate_message(message: &InputMessage) -> Vec<Value> {
             if text.is_empty() && tool_calls.is_empty() {
                 Vec::new()
             } else {
-                vec![json!({
+                let mut translated = json!({
                     "role": "assistant",
                     "content": (!text.is_empty()).then_some(text),
-                    "tool_calls": tool_calls,
-                })]
+                });
+                if !tool_calls.is_empty() {
+                    translated["tool_calls"] = Value::Array(tool_calls);
+                }
+                vec![translated]
             }
         }
         _ => message
@@ -1134,8 +1137,8 @@ impl StringExt for String {
 mod tests {
     use super::{
         azure_chat_completions_endpoint, build_chat_completion_request, chat_completions_endpoint,
-        normalize_finish_reason, openai_tool_choice, parse_tool_arguments, MaxTokensField,
-        OpenAiCompatClient, OpenAiCompatConfig, DEFAULT_AZURE_OPENAI_API_VERSION,
+        normalize_finish_reason, openai_tool_choice, parse_tool_arguments, translate_message,
+        MaxTokensField, OpenAiCompatClient, OpenAiCompatConfig, DEFAULT_AZURE_OPENAI_API_VERSION,
     };
     use crate::error::ApiError;
     use crate::types::{
@@ -1186,6 +1189,21 @@ mod tests {
         assert_eq!(payload["messages"][2]["role"], json!("tool"));
         assert_eq!(payload["tools"][0]["type"], json!("function"));
         assert_eq!(payload["tool_choice"], json!("auto"));
+    }
+
+    #[test]
+    fn assistant_messages_omit_empty_tool_calls() {
+        let translated = translate_message(&InputMessage {
+            role: "assistant".to_string(),
+            content: vec![InputContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+        });
+
+        assert_eq!(translated.len(), 1);
+        assert_eq!(translated[0]["role"], json!("assistant"));
+        assert_eq!(translated[0]["content"], json!("hello"));
+        assert!(translated[0].get("tool_calls").is_none());
     }
 
     #[test]
