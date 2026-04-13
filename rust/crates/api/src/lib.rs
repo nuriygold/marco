@@ -10,7 +10,10 @@ pub use client::{
     ProviderClient,
 };
 pub use error::ApiError;
-pub use providers::claw_provider::{AuthSource, ClawApiClient, ClawApiClient as ApiClient};
+pub use providers::claw_provider::{
+    mothership_startup_diagnostics, AuthSource, ClawApiClient, ClawApiClient as ApiClient,
+    MothershipStartupDiagnostics,
+};
 pub use providers::openai_compat::{OpenAiCompatClient, OpenAiCompatConfig};
 pub use providers::{
     detect_provider_kind, max_tokens_for_model, resolve_model_alias, ProviderKind,

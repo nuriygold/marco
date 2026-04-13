@@ -18,8 +18,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use api::{
     resolve_startup_auth_source, AuthSource, ClawApiClient, ContentBlockDelta, InputContentBlock,
     InputMessage, MessageRequest, MessageResponse, OutputContentBlock, ProviderClient,
-    ProviderKind,
-    StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
+    ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition,
+    ToolResultContentBlock,
 };
 
 use commands::{
@@ -820,6 +820,8 @@ struct StatusContext {
     memory_file_count: usize,
     project_root: Option<PathBuf>,
     git_branch: Option<String>,
+    mothership_auth_enabled: bool,
+    mothership_key_source: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2193,6 +2195,7 @@ fn status_context(
         ProjectContext::discover_with_git_and_explicit(&cwd, DEFAULT_DATE, context_sources)?;
     let (project_root, git_branch) =
         parse_git_status_metadata(project_context.git_status.as_deref());
+    let mothership = api::mothership_startup_diagnostics();
     Ok(StatusContext {
         cwd,
         session_path: session_path.map(Path::to_path_buf),
@@ -2202,6 +2205,8 @@ fn status_context(
             + project_context.explicit_context_files.len(),
         project_root,
         git_branch,
+        mothership_auth_enabled: mothership.auth_enabled,
+        mothership_key_source: mothership.key_source,
     })
 }
 
@@ -2243,6 +2248,7 @@ fn format_status_report(
   Session file     {}
   Config files     loaded {}/{}
   Memory files     {}
+  Mothership auth  {} (key source: {})
 
 Next
   /help            Browse commands
@@ -2261,6 +2267,12 @@ Next
             context.loaded_config_files,
             context.discovered_config_files,
             context.memory_file_count,
+            if context.mothership_auth_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            context.mothership_key_source,
         ),
     ]
     .join(
@@ -4867,6 +4879,8 @@ mod tests {
                 memory_file_count: 4,
                 project_root: Some(PathBuf::from("/tmp")),
                 git_branch: Some("main".to_string()),
+                mothership_auth_enabled: true,
+                mothership_key_source: "env:MOTHERSHIP_V2_KEY",
             },
         );
         assert!(status.contains("Session"));
@@ -4880,6 +4894,7 @@ mod tests {
         assert!(status.contains("Session file     session.json"));
         assert!(status.contains("Config files     loaded 2/3"));
         assert!(status.contains("Memory files     4"));
+        assert!(status.contains("Mothership auth  enabled (key source: env:MOTHERSHIP_V2_KEY)"));
         assert!(status.contains("/session list"));
     }
 
