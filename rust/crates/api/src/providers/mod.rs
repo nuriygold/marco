@@ -320,7 +320,10 @@ mod tests {
         let _anthropic_api_key = EnvVarGuard::set("ANTHROPIC_API_KEY", Some("claw-test-key"));
         let _openai_api_key = EnvVarGuard::set("OPENAI_API_KEY", Some("openai-test-key"));
         let _azure_api_key = EnvVarGuard::set("AZURE_OPENAI_API_KEY", Some("azure-test-key"));
-        assert_eq!(detect_provider_kind("gpt-5.4-mini"), ProviderKind::AzureOpenAi);
+        assert_eq!(
+            detect_provider_kind("gpt-5.4-mini"),
+            ProviderKind::AzureOpenAi
+        );
     }
 
     #[test]

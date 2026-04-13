@@ -11,6 +11,10 @@ pub use client::{
     resolve_startup_auth_source,
 };
 pub use error::ApiError;
+pub use providers::claw_provider::{
+    mothership_startup_diagnostics, AuthSource, ClawApiClient, ClawApiClient as ApiClient,
+    MothershipStartupDiagnostics,
+};
 pub use mothership_v2::{
     ActivityLogItem, ActivityLogRequest, ActivityLogResponse, ApproveActionRequest,
     ApproveActionResponse, DashboardTodayRequest, DashboardTodayResponse, EmailAiDraft,
