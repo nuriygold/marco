@@ -2,6 +2,8 @@ use std::env::VarError;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
+use serde_json::Value;
+
 #[derive(Debug)]
 pub enum ApiError {
     MissingCredentials {
@@ -59,6 +61,52 @@ impl ApiError {
             | Self::BackoffOverflow { .. } => false,
         }
     }
+
+    #[must_use]
+    pub fn api_from_error_envelope(
+        status: reqwest::StatusCode,
+        body: String,
+        retryable: bool,
+    ) -> Self {
+        let (error_type, message) = extract_error_details(&body);
+        Self::Api {
+            status,
+            error_type,
+            message,
+            body,
+            retryable,
+        }
+    }
+}
+
+fn extract_error_details(body: &str) -> (Option<String>, Option<String>) {
+    let Ok(value) = serde_json::from_str::<Value>(body) else {
+        return (None, None);
+    };
+
+    let root = value
+        .get("error")
+        .filter(|error| error.is_object())
+        .unwrap_or(&value);
+
+    (
+        root.get("type")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                root.get("code")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            }),
+        root.get("message")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                root.get("detail")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            }),
+    )
 }
 
 impl Display for ApiError {

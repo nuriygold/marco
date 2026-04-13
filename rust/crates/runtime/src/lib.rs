@@ -13,6 +13,7 @@ mod oauth;
 mod permissions;
 mod prompt;
 mod remote;
+mod routing;
 pub mod sandbox;
 mod session;
 mod usage;
@@ -84,6 +85,11 @@ pub use session::{
     CommandExecutionMode, CommandExecutionRecord, ContentBlock, ConversationMessage, MessageRole,
     Session, SessionError,
 };
+pub use routing::{
+    CapabilityTelemetry, CapabilityTelemetryCounter, CommandCapability, CommandRouter,
+    ResolvedCommandPolicy,
+};
+pub use session::{ContentBlock, ConversationMessage, MessageRole, Session, SessionError};
 pub use usage::{
     format_usd, pricing_for_model, ModelPricing, TokenUsage, UsageCostEstimate, UsageTracker,
 };

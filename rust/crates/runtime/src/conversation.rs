@@ -7,8 +7,11 @@ use crate::compact::{
 use crate::config::RuntimeFeatureConfig;
 use crate::hooks::{HookRunResult, HookRunner};
 use crate::permissions::{PermissionOutcome, PermissionPolicy, PermissionPrompter};
+use crate::routing::{CapabilityTelemetry, CommandRouter};
 use crate::session::{ContentBlock, ConversationMessage, Session};
 use crate::usage::{TokenUsage, UsageTracker};
+use std::cmp;
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiRequest {
@@ -97,6 +100,8 @@ pub struct ConversationRuntime<C, T> {
     max_iterations: usize,
     usage_tracker: UsageTracker,
     hook_runner: HookRunner,
+    command_router: CommandRouter,
+    capability_telemetry: CapabilityTelemetry,
 }
 
 impl<C, T> ConversationRuntime<C, T>
@@ -141,6 +146,8 @@ where
             max_iterations: usize::MAX,
             usage_tracker,
             hook_runner: HookRunner::from_feature_config(&feature_config),
+            command_router: CommandRouter,
+            capability_telemetry: CapabilityTelemetry::default(),
         }
     }
 
@@ -199,11 +206,26 @@ where
             }
 
             for (tool_use_id, tool_name, input) in pending_tool_uses {
+                let started = Instant::now();
+                let route = self.command_router.resolve(&tool_name);
+                let required_mode = cmp::max(
+                    self.permission_policy.required_mode_for(&tool_name),
+                    route.safety_policy,
+                );
                 let permission_outcome = if let Some(prompt) = prompter.as_mut() {
-                    self.permission_policy
-                        .authorize(&tool_name, &input, Some(*prompt))
+                    self.permission_policy.authorize_with_required_mode(
+                        &tool_name,
+                        &input,
+                        required_mode,
+                        Some(*prompt),
+                    )
                 } else {
-                    self.permission_policy.authorize(&tool_name, &input, None)
+                    self.permission_policy.authorize_with_required_mode(
+                        &tool_name,
+                        &input,
+                        required_mode,
+                        None,
+                    )
                 };
 
                 let result_message = match permission_outcome {
@@ -249,6 +271,15 @@ where
                         ConversationMessage::tool_result(tool_use_id, tool_name, reason, true)
                     }
                 };
+                let ok = matches!(
+                    &result_message.blocks[0],
+                    ContentBlock::ToolResult {
+                        is_error: false,
+                        ..
+                    }
+                );
+                self.capability_telemetry
+                    .record(route.capability, started.elapsed(), ok);
                 self.session.messages.push(result_message.clone());
                 tool_results.push(result_message);
             }
@@ -275,6 +306,11 @@ where
     #[must_use]
     pub fn usage(&self) -> &UsageTracker {
         &self.usage_tracker
+    }
+
+    #[must_use]
+    pub fn capability_telemetry(&self) -> &CapabilityTelemetry {
+        &self.capability_telemetry
     }
 
     #[must_use]
@@ -410,6 +446,7 @@ mod tests {
         PermissionRequest,
     };
     use crate::prompt::{ProjectContext, SystemPromptBuilder};
+    use crate::routing::CommandCapability;
     use crate::session::{ContentBlock, MessageRole, Session};
     use crate::usage::TokenUsage;
     use std::path::PathBuf;
@@ -524,6 +561,11 @@ mod tests {
                 ..
             }
         ));
+        let telemetry = runtime.capability_telemetry().snapshot();
+        assert_eq!(telemetry.len(), 1);
+        assert_eq!(telemetry[0].capability, CommandCapability::CoreAssistant);
+        assert_eq!(telemetry[0].success, 1);
+        assert_eq!(telemetry[0].failure, 0);
     }
 
     #[test]
@@ -578,6 +620,9 @@ mod tests {
             &summary.tool_results[0].blocks[0],
             ContentBlock::ToolResult { is_error: true, output, .. } if output == "not now"
         ));
+        let telemetry = runtime.capability_telemetry().snapshot();
+        assert_eq!(telemetry.len(), 1);
+        assert_eq!(telemetry[0].failure, 1);
     }
 
     #[test]
