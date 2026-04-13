@@ -25,7 +25,7 @@ use api::{
 use commands::{
     handle_agents_slash_command, handle_plugins_slash_command, handle_skills_slash_command,
     render_slash_command_help, resume_supported_slash_commands, slash_command_specs,
-    suggest_slash_commands, SlashCommand,
+    suggest_slash_commands, DomainCommand, DomainCommandRegistry, SlashCommand,
 };
 use compat_harness::{extract_manifest, UpstreamPaths};
 use init::initialize_repo;
@@ -383,6 +383,15 @@ fn parse_direct_slash_cli_action(rest: &[String]) -> Result<CliAction, String> {
     }
 }
 
+fn render_domain_command_notice(command: &DomainCommand) -> String {
+    format!(
+        "Domain command
+  Status           parsed (mothership_commands_enabled)
+  Action           {command:?}
+  Next             connect this action to deployment-specific handlers"
+    )
+}
+
 fn format_direct_slash_command_error(command: &str, is_unknown: bool) -> String {
     let trimmed = command.trim().trim_start_matches('/');
     let mut lines = vec![
@@ -456,6 +465,26 @@ fn default_permission_mode() -> PermissionMode {
         .as_deref()
         .and_then(normalize_permission_mode)
         .map_or(PermissionMode::DangerFullAccess, permission_mode_from_label)
+}
+
+fn mothership_commands_enabled() -> bool {
+    let cwd = env::current_dir().ok();
+    let config_enabled = cwd
+        .as_ref()
+        .and_then(|dir| ConfigLoader::default_for(dir).load().ok())
+        .and_then(|config| {
+            config
+                .get("mothership_commands_enabled")
+                .and_then(|value| value.as_bool())
+        });
+
+    config_enabled
+        .or_else(|| {
+            env::var("MOTHERSHIP_COMMANDS_ENABLED")
+                .ok()
+                .and_then(|value| value.parse().ok())
+        })
+        .unwrap_or(false)
 }
 
 fn filter_tool_specs(
@@ -1160,6 +1189,10 @@ fn run_repl(
                     cli.persist_session()?;
                     break;
                 }
+                if let Some(domain_command) = cli.domain_commands.parse(trimmed) {
+                    cli.handle_domain_command(domain_command);
+                    continue;
+                }
                 if let Some(command) = SlashCommand::parse(trimmed) {
                     if cli.handle_repl_command(command)? {
                         cli.persist_session()?;
@@ -1202,6 +1235,7 @@ struct LiveCli {
     system_prompt: Vec<String>,
     runtime: ConversationRuntime<DefaultRuntimeClient, CliToolExecutor>,
     session: SessionHandle,
+    domain_commands: DomainCommandRegistry,
 }
 
 impl LiveCli {
@@ -1232,6 +1266,11 @@ impl LiveCli {
             system_prompt,
             runtime,
             session,
+            domain_commands: if mothership_commands_enabled() {
+                DomainCommandRegistry::all_enabled()
+            } else {
+                DomainCommandRegistry::with_enabled(std::iter::empty())
+            },
         };
         cli.persist_session()?;
         Ok(cli)
@@ -1494,6 +1533,10 @@ impl LiveCli {
                 false
             }
         })
+    }
+
+    fn handle_domain_command(&self, command: DomainCommand) {
+        println!("{}", render_domain_command_notice(&command));
     }
 
     fn persist_session(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -3796,7 +3839,7 @@ fn format_edit_result(icon: &str, parsed: &serde_json::Value) -> String {
     let path = extract_tool_path(parsed);
     let suffix = if parsed
         .get("replaceAll")
-        .and_then(serde_json::Value::as_bool)
+        .and_then(|value| value.as_bool())
         .unwrap_or(false)
     {
         " (replace all)"

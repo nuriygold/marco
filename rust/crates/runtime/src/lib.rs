@@ -13,6 +13,7 @@ mod oauth;
 mod permissions;
 mod prompt;
 mod remote;
+mod routing;
 pub mod sandbox;
 mod session;
 mod usage;
@@ -79,6 +80,10 @@ pub use remote::{
     inherited_upstream_proxy_env, no_proxy_list, read_token, upstream_proxy_ws_url,
     RemoteSessionContext, UpstreamProxyBootstrap, UpstreamProxyState, DEFAULT_REMOTE_BASE_URL,
     DEFAULT_SESSION_TOKEN_PATH, DEFAULT_SYSTEM_CA_BUNDLE, NO_PROXY_HOSTS, UPSTREAM_PROXY_ENV_KEYS,
+};
+pub use routing::{
+    CapabilityTelemetry, CapabilityTelemetryCounter, CommandCapability, CommandRouter,
+    ResolvedCommandPolicy,
 };
 pub use session::{ContentBlock, ConversationMessage, MessageRole, Session, SessionError};
 pub use usage::{
