@@ -282,6 +282,10 @@ where
         &self.session
     }
 
+    pub fn session_mut(&mut self) -> &mut Session {
+        &mut self.session
+    }
+
     #[must_use]
     pub fn into_session(self) -> Session {
         self.session
