@@ -244,5 +244,45 @@ class PortingWorkspaceTests(unittest.TestCase):
         self.assertIn('mode=deep-link', deep_link_result.stdout)
 
 
+
+    def test_task_mutation_defaults_to_dry_run(self) -> None:
+        result = subprocess.run(
+            [sys.executable, '-m', 'src.main', 'task', 'start', 'TASK-123'],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn('[DRY_RUN]', result.stdout)
+        self.assertIn("status=preview", result.stdout)
+
+    def test_task_mutation_execute_and_approve_execute(self) -> None:
+        task_result = subprocess.run(
+            [sys.executable, '-m', 'src.main', 'task', 'defer', 'TASK-123', '--execute'],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        approve_result = subprocess.run(
+            [sys.executable, '-m', 'src.main', 'approve', 'REQ-123', '--execute', '--yes'],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn('[EXECUTED]', task_result.stdout)
+        self.assertIn('status=success', task_result.stdout)
+        self.assertIn('[EXECUTED]', approve_result.stdout)
+        self.assertIn('status=success', approve_result.stdout)
+
+    def test_high_impact_mutation_without_confirmation_cancels(self) -> None:
+        result = subprocess.run(
+            [sys.executable, '-m', 'src.main', 'task', 'complete', 'TASK-123', '--execute'],
+            check=False,
+            capture_output=True,
+            text=True,
+            input='n\n',
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('status=cancelled', result.stdout)
+
 if __name__ == '__main__':
     unittest.main()
