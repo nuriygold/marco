@@ -81,6 +81,10 @@ pub use remote::{
     RemoteSessionContext, UpstreamProxyBootstrap, UpstreamProxyState, DEFAULT_REMOTE_BASE_URL,
     DEFAULT_SESSION_TOKEN_PATH, DEFAULT_SYSTEM_CA_BUNDLE, NO_PROXY_HOSTS, UPSTREAM_PROXY_ENV_KEYS,
 };
+pub use session::{
+    CommandExecutionMode, CommandExecutionRecord, ContentBlock, ConversationMessage, MessageRole,
+    Session, SessionError,
+};
 pub use routing::{
     CapabilityTelemetry, CapabilityTelemetryCounter, CommandCapability, CommandRouter,
     ResolvedCommandPolicy,

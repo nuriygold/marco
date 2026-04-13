@@ -47,6 +47,28 @@ pub struct ConversationMessage {
 pub struct Session {
     pub version: u32,
     pub messages: Vec<ConversationMessage>,
+    #[serde(default)]
+    pub command_execution_records: Vec<CommandExecutionRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CommandExecutionRecord {
+    pub timestamp: u64,
+    pub command_text: String,
+    pub command_family: String,
+    pub target_id: Option<String>,
+    pub execution_mode: CommandExecutionMode,
+    pub status: String,
+    pub latency_ms: u128,
+    pub response_summary: Option<String>,
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandExecutionMode {
+    DryRun,
+    Executed,
 }
 
 #[derive(Debug)]
@@ -86,6 +108,7 @@ impl Session {
         Self {
             version: 1,
             messages: Vec::new(),
+            command_execution_records: Vec::new(),
         }
     }
 
@@ -115,6 +138,15 @@ impl Session {
                     .collect(),
             ),
         );
+        object.insert(
+            "command_execution_records".to_string(),
+            JsonValue::Array(
+                self.command_execution_records
+                    .iter()
+                    .map(CommandExecutionRecord::to_json)
+                    .collect(),
+            ),
+        );
         JsonValue::Object(object)
     }
 
@@ -135,13 +167,162 @@ impl Session {
             .iter()
             .map(ConversationMessage::from_json)
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { version, messages })
+        let command_execution_records = object
+            .get("command_execution_records")
+            .and_then(JsonValue::as_array)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(CommandExecutionRecord::from_json)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        Ok(Self {
+            version,
+            messages,
+            command_execution_records,
+        })
+    }
+
+    pub fn push_command_execution_record(
+        &mut self,
+        record: CommandExecutionRecord,
+        max_entries: usize,
+    ) {
+        self.command_execution_records.push(record);
+        if self.command_execution_records.len() > max_entries {
+            let to_drop = self.command_execution_records.len() - max_entries;
+            self.command_execution_records.drain(0..to_drop);
+        }
     }
 }
 
 impl Default for Session {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl CommandExecutionRecord {
+    #[must_use]
+    pub fn to_json(&self) -> JsonValue {
+        let mut object = BTreeMap::new();
+        object.insert(
+            "timestamp".to_string(),
+            JsonValue::Number(self.timestamp as i64),
+        );
+        object.insert(
+            "command_text".to_string(),
+            JsonValue::String(self.command_text.clone()),
+        );
+        object.insert(
+            "command_family".to_string(),
+            JsonValue::String(self.command_family.clone()),
+        );
+        if let Some(target_id) = &self.target_id {
+            object.insert(
+                "target_id".to_string(),
+                JsonValue::String(target_id.clone()),
+            );
+        }
+        object.insert(
+            "execution_mode".to_string(),
+            JsonValue::String(
+                match self.execution_mode {
+                    CommandExecutionMode::DryRun => "dry_run",
+                    CommandExecutionMode::Executed => "executed",
+                }
+                .to_string(),
+            ),
+        );
+        object.insert("status".to_string(), JsonValue::String(self.status.clone()));
+        object.insert(
+            "latency_ms".to_string(),
+            JsonValue::Number(self.latency_ms as i64),
+        );
+        if let Some(response_summary) = &self.response_summary {
+            object.insert(
+                "response_summary".to_string(),
+                JsonValue::String(response_summary.clone()),
+            );
+        }
+        if let Some(error_code) = &self.error_code {
+            object.insert(
+                "error_code".to_string(),
+                JsonValue::String(error_code.clone()),
+            );
+        }
+        JsonValue::Object(object)
+    }
+
+    fn from_json(value: &JsonValue) -> Result<Self, SessionError> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| SessionError::Format("record must be an object".to_string()))?;
+        let timestamp = object
+            .get("timestamp")
+            .and_then(JsonValue::as_i64)
+            .ok_or_else(|| SessionError::Format("missing record timestamp".to_string()))?;
+        let timestamp = u64::try_from(timestamp)
+            .map_err(|_| SessionError::Format("record timestamp out of range".to_string()))?;
+        let command_text = object
+            .get("command_text")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| SessionError::Format("missing command_text".to_string()))?
+            .to_string();
+        let command_family = object
+            .get("command_family")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| SessionError::Format("missing command_family".to_string()))?
+            .to_string();
+        let target_id = object
+            .get("target_id")
+            .and_then(JsonValue::as_str)
+            .map(ToOwned::to_owned);
+        let execution_mode = match object
+            .get("execution_mode")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| SessionError::Format("missing execution_mode".to_string()))?
+        {
+            "dry_run" => CommandExecutionMode::DryRun,
+            "executed" => CommandExecutionMode::Executed,
+            other => {
+                return Err(SessionError::Format(format!(
+                    "unsupported execution_mode: {other}"
+                )))
+            }
+        };
+        let status = object
+            .get("status")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| SessionError::Format("missing status".to_string()))?
+            .to_string();
+        let latency_ms = object
+            .get("latency_ms")
+            .and_then(JsonValue::as_i64)
+            .ok_or_else(|| SessionError::Format("missing latency_ms".to_string()))?;
+        let latency_ms = u128::try_from(latency_ms)
+            .map_err(|_| SessionError::Format("latency_ms out of range".to_string()))?;
+        let response_summary = object
+            .get("response_summary")
+            .and_then(JsonValue::as_str)
+            .map(ToOwned::to_owned);
+        let error_code = object
+            .get("error_code")
+            .and_then(JsonValue::as_str)
+            .map(ToOwned::to_owned);
+        Ok(Self {
+            timestamp,
+            command_text,
+            command_family,
+            target_id,
+            execution_mode,
+            status,
+            latency_ms,
+            response_summary,
+            error_code,
+        })
     }
 }
 

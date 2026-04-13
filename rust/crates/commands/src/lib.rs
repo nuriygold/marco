@@ -87,7 +87,15 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         name: "status",
         aliases: &[],
         summary: "Show current session status",
-        argument_hint: None,
+        argument_hint: Some("[--json]"),
+        resume_supported: true,
+        category: SlashCommandCategory::Core,
+    },
+    SlashCommandSpec {
+        name: "activity",
+        aliases: &[],
+        summary: "Tail recent command execution activity",
+        argument_hint: Some("[tail]"),
         resume_supported: true,
         category: SlashCommandCategory::Core,
     },
@@ -306,7 +314,12 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashCommand {
     Help,
-    Status,
+    Status {
+        json: bool,
+    },
+    Activity {
+        action: Option<String>,
+    },
     Compact,
     Branch {
         action: Option<String>,
@@ -389,7 +402,12 @@ impl SlashCommand {
         let command = parts.next().unwrap_or_default();
         Some(match command {
             "help" => Self::Help,
-            "status" => Self::Status,
+            "status" => Self::Status {
+                json: parts.any(|part| part == "--json"),
+            },
+            "activity" => Self::Activity {
+                action: parts.next().map(ToOwned::to_owned),
+            },
             "compact" => Self::Compact,
             "branch" => Self::Branch {
                 action: parts.next().map(ToOwned::to_owned),
@@ -1761,7 +1779,8 @@ pub fn handle_slash_command(
             message: render_slash_command_help(),
             session: session.clone(),
         }),
-        SlashCommand::Status
+        SlashCommand::Status { .. }
+        | SlashCommand::Activity { .. }
         | SlashCommand::Branch { .. }
         | SlashCommand::Bughunter { .. }
         | SlashCommand::Worktree { .. }
@@ -1964,7 +1983,14 @@ mod tests {
     #[test]
     fn parses_supported_slash_commands() {
         assert_eq!(SlashCommand::parse("/help"), Some(SlashCommand::Help));
-        assert_eq!(SlashCommand::parse(" /status "), Some(SlashCommand::Status));
+        assert_eq!(
+            SlashCommand::parse(" /status "),
+            Some(SlashCommand::Status { json: false })
+        );
+        assert_eq!(
+            SlashCommand::parse("/status --json"),
+            Some(SlashCommand::Status { json: true })
+        );
         assert_eq!(
             SlashCommand::parse("/bughunter runtime"),
             Some(SlashCommand::Bughunter {
@@ -2120,6 +2146,7 @@ mod tests {
         assert!(help.contains("Automation & discovery"));
         assert!(help.contains("/help"));
         assert!(help.contains("/status"));
+        assert!(help.contains("/activity [tail]"));
         assert!(help.contains("/compact"));
         assert!(help.contains("/bughunter [scope]"));
         assert!(help.contains("/branch [list|create <name>|switch <name>]"));
@@ -2149,15 +2176,15 @@ mod tests {
         assert!(help.contains("aliases: /plugins, /marketplace"));
         assert!(help.contains("/agents"));
         assert!(help.contains("/skills"));
-        assert_eq!(slash_command_specs().len(), 28);
-        assert_eq!(resume_supported_slash_commands().len(), 13);
+        assert_eq!(slash_command_specs().len(), 29);
+        assert_eq!(resume_supported_slash_commands().len(), 14);
     }
 
     #[test]
     fn suggests_close_slash_commands() {
         let suggestions = suggest_slash_commands("stats", 3);
         assert!(!suggestions.is_empty());
-        assert_eq!(suggestions[0], "/status");
+        assert_eq!(suggestions[0], "/status [--json]");
     }
 
     #[test]
@@ -2174,6 +2201,7 @@ mod tests {
                     text: "recent".to_string(),
                 }]),
             ],
+            command_execution_records: Vec::new(),
         };
 
         let result = handle_slash_command(
