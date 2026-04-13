@@ -16,6 +16,7 @@ from .session_store import load_session
 from .setup import run_setup
 from .tool_pool import assemble_tool_pool
 from .tools import execute_tool, get_tool, get_tools, render_tool_index
+from .mutations import MutationIntent, render_mutation_result, run_mutation_intent
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,6 +89,19 @@ def build_parser() -> argparse.ArgumentParser:
     exec_tool_parser = subparsers.add_parser('exec-tool', help='execute a mirrored tool shim by exact name')
     exec_tool_parser.add_argument('name')
     exec_tool_parser.add_argument('payload')
+
+    task_parser = subparsers.add_parser('task', help='preview or execute task mutations')
+    task_subparsers = task_parser.add_subparsers(dest='task_action', required=True)
+    for action in ('start', 'defer', 'complete', 'unblock'):
+        action_parser = task_subparsers.add_parser(action, help=f'{action} a task by id')
+        action_parser.add_argument('task_id')
+        action_parser.add_argument('--execute', action='store_true', help='apply mutation instead of default dry-run preview')
+        action_parser.add_argument('--yes', action='store_true', help='skip confirmation prompts for high-impact actions')
+
+    approve_parser = subparsers.add_parser('approve', help='preview or execute approval mutation')
+    approve_parser.add_argument('request_id')
+    approve_parser.add_argument('--execute', action='store_true', help='apply mutation instead of default dry-run preview')
+    approve_parser.add_argument('--yes', action='store_true', help='skip confirmation prompts for high-impact actions')
     return parser
 
 
@@ -205,6 +219,22 @@ def main(argv: list[str] | None = None) -> int:
         result = execute_tool(args.name, args.payload)
         print(result.message)
         return 0 if result.handled else 1
+    if args.command == 'task':
+        intent = MutationIntent(action=f'task {args.task_action}', target=args.task_id, execute=args.execute)
+        confirmed = args.yes
+        if args.execute and not args.yes and args.task_action == 'complete':
+            confirmed = input(f'Confirm execute {intent.action} on {intent.target}? [y/N]: ').strip().lower() in {'y', 'yes'}
+        result = run_mutation_intent(intent, confirmed=confirmed)
+        print(render_mutation_result(result))
+        return 0 if result.status in {'preview', 'success'} else 1
+    if args.command == 'approve':
+        intent = MutationIntent(action='approve', target=args.request_id, execute=args.execute)
+        confirmed = args.yes
+        if args.execute and not args.yes:
+            confirmed = input(f'Confirm execute {intent.action} on {intent.target}? [y/N]: ').strip().lower() in {'y', 'yes'}
+        result = run_mutation_intent(intent, confirmed=confirmed)
+        print(render_mutation_result(result))
+        return 0 if result.status in {'preview', 'success'} else 1
     parser.error(f'unknown command: {args.command}')
     return 2
 
