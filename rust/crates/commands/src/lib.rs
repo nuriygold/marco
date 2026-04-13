@@ -9,6 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use plugins::{PluginError, PluginManager, PluginSummary};
 use runtime::{compact_session, CompactionConfig, Session};
 
+mod domain;
+
+pub use domain::{DomainCommand, DomainCommandRegistry};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandManifestEntry {
     pub name: String,
