@@ -4,8 +4,30 @@
 {% block subheading %}Propose, inspect, apply with typed confirmation, and rollback.{% endblock %}
 
 {% block content %}
+<section class="mb-6 rounded-lg border border-violet-500/40 bg-violet-500/5 p-4">
+  <h2 class="mb-2 text-sm font-semibold text-violet-200">✨ AI patch suggestion</h2>
+  <p class="mb-3 text-xs text-violet-100/80">
+    Describe the change you want in plain English. Marco will read the target file and
+    stage a patch proposal for you to review, type-confirm, and apply.
+  </p>
+  <form onsubmit="return marcoAIPatchSuggest(event)" class="grid gap-3 md:grid-cols-2" id="marco-ai-patch-form">
+    <input name="target" placeholder="target file (relative to workspace)" required
+           class="rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-violet-500/40 md:col-span-2" />
+    <textarea name="description" placeholder='what should change? e.g. "rename function foo to bar in src/utils.py"' required rows="2"
+              class="rounded bg-slate-950 px-3 py-1.5 text-xs ring-1 ring-violet-500/40 md:col-span-2"></textarea>
+    <button type="submit" id="marco-ai-patch-btn"
+            data-ai-gated="true"
+            class="rounded bg-violet-500/30 px-3 py-2 text-sm text-violet-100 hover:bg-violet-500/50 disabled:opacity-40 disabled:cursor-not-allowed md:col-span-2">
+      ✨ Suggest + stage patch
+    </button>
+  </form>
+  <p id="marco-ai-patch-hint" class="mt-2 hidden text-xs text-slate-500">
+    AI suggestion is disabled — set Azure OpenAI env vars and restart the service to enable.
+  </p>
+</section>
+
 <section class="mb-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
-  <h2 class="mb-3 text-sm font-semibold">Propose new patch</h2>
+  <h2 class="mb-3 text-sm font-semibold">Propose new patch (manual)</h2>
   <form onsubmit="return marcoProposePatch(event)" class="grid gap-3 md:grid-cols-2">
     <input name="name" placeholder="patch name (unique)" required
            class="rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700" />

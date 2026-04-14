@@ -9,8 +9,18 @@
   <form onsubmit="return marcoPlan(event)" class="flex gap-2">
     <input name="goal" placeholder="e.g. refactor auth flow"
            class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700" />
-    <button class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Plan</button>
+    <button type="submit" class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Plan</button>
+    <button type="button" id="marco-ai-plan-btn"
+            onclick="marcoAIPlan(event)"
+            data-ai-gated="true"
+            title="Requires Azure OpenAI configuration"
+            class="rounded bg-violet-500/20 px-3 py-1.5 text-sm text-violet-300 hover:bg-violet-500/30 disabled:opacity-40 disabled:cursor-not-allowed">
+      ✨ AI plan
+    </button>
   </form>
+  <p id="marco-ai-hint" class="mt-2 hidden text-xs text-slate-500">
+    AI planning is disabled — set Azure OpenAI env vars and restart the service to enable.
+  </p>
 </section>
 
 <section class="grid gap-4 md:grid-cols-5">

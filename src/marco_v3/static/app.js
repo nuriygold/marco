@@ -15,6 +15,74 @@ async function marcoPost(url, body) {
   return res.json();
 }
 
+// ---------- AI (Azure OpenAI) ----------
+
+let _aiStatusCache = null;
+
+async function marcoAIStatus() {
+  if (_aiStatusCache) return _aiStatusCache;
+  try {
+    _aiStatusCache = await marcoGet('/api/ai/status');
+  } catch (e) {
+    _aiStatusCache = { configured: false };
+  }
+  return _aiStatusCache;
+}
+
+async function marcoInitAIGates() {
+  // Disables any button/form with data-ai-gated if Azure OpenAI is not configured,
+  // and shows the adjacent #marco-ai-hint / #marco-ai-patch-hint text.
+  const status = await marcoAIStatus();
+  const gated = document.querySelectorAll('[data-ai-gated="true"]');
+  if (!status.configured) {
+    gated.forEach(el => { el.disabled = true; });
+    const hints = document.querySelectorAll('#marco-ai-hint, #marco-ai-patch-hint');
+    hints.forEach(el => el.classList.remove('hidden'));
+  }
+}
+
+document.addEventListener('DOMContentLoaded', marcoInitAIGates);
+
+async function marcoAIPlan(event) {
+  if (event) event.preventDefault();
+  const input = document.querySelector('input[name="goal"]');
+  const goal = (input && input.value || '').trim();
+  if (!goal) { alert('Enter a goal first.'); return false; }
+  const btn = document.getElementById('marco-ai-plan-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '✨ thinking...'; }
+  try {
+    const session = await marcoPost('/api/ai/plan', { goal });
+    window.location.href = `/sessions?focus=${session.session_id}`;
+  } catch (e) {
+    alert('AI plan failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '✨ AI plan'; }
+  }
+  return false;
+}
+
+async function marcoAIPatchSuggest(event) {
+  if (event) event.preventDefault();
+  const form = document.getElementById('marco-ai-patch-form');
+  const description = form.description.value.trim();
+  const target = form.target.value.trim();
+  if (!description || !target) { alert('Need target + description.'); return false; }
+  const btn = document.getElementById('marco-ai-patch-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '✨ analyzing...'; }
+  try {
+    const result = await marcoPost('/api/ai/patch-suggestion', { target, description, create_proposal: true });
+    if (result.created_proposal) {
+      window.location.href = `/patches/${result.created_proposal.patch_id}`;
+    } else {
+      alert('Suggestion produced but proposal failed: ' + (result.proposal_error || 'unknown'));
+      if (btn) { btn.disabled = false; btn.textContent = '✨ Suggest + stage patch'; }
+    }
+  } catch (e) {
+    alert('AI patch suggestion failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '✨ Suggest + stage patch'; }
+  }
+  return false;
+}
+
 async function marcoGet(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(res.statusText);
