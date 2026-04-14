@@ -90,7 +90,7 @@ function marcoChatRenderMessage(msg) {
   wrap.className = 'flex ' + (msg.role === 'user' ? 'justify-end' : 'justify-start');
 
   const bubble = document.createElement('div');
-  bubble.className = 'max-w-3xl rounded-lg px-3 py-2 text-sm ' + (
+  bubble.className = 'max-w-[85%] rounded-lg px-3 py-2 text-sm ' + (
     msg.role === 'user' ? 'bg-emerald-500/15 text-emerald-100' :
     msg.role === 'assistant' ? 'bg-slate-800 text-slate-100' :
     'bg-amber-500/10 text-amber-200 text-xs'

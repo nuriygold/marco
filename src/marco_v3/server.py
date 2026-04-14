@@ -83,7 +83,7 @@ SERVER_PROFILE = MarcoProfile(safety_mode='workspace-write', pause_before_mutati
 
 _HEAVY_RE = re.compile(
     r'\b(patch|fix|change|update|modify|refactor|plan|implement|add|remove|delete|'
-    r'debug|broken|error|fail|why|how do|create|build|deploy|migrate|generate|'
+    r'debug|broken|error|fail|bug|issue|wrong|why|how do|create|build|deploy|migrate|generate|'
     r'suggest|stage|propose|review|analyze|analyse|diagnose|improve|rewrite|rename)\b',
     re.IGNORECASE,
 )
