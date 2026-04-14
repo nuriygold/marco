@@ -71,7 +71,7 @@ def _grok_cfg(**overrides) -> llm.ProviderConfig:
         provider='grok',
         api_key='xai-test',
         url='https://api.x.ai/v1/chat/completions',
-        model='grok-code-fast-1',
+        model='grok-4-fast-reasoning',
         auth_header='Authorization',
         auth_prefix='Bearer ',
         tokens_field='max_tokens',
@@ -111,10 +111,44 @@ class UrlBuildingTests(unittest.TestCase):
         self.assertEqual(cfg.url, 'https://api.x.ai/v1/chat/completions')
         self.assertEqual(cfg.auth_header, 'Authorization')
         self.assertEqual(cfg.auth_prefix, 'Bearer ')
-        self.assertEqual(cfg.model, 'grok-code-fast-1')
+        self.assertEqual(cfg.model, 'grok-4-fast-reasoning')
 
     def test_grok_requires_key(self) -> None:
         with mock.patch.dict('os.environ', {'MARCO_LLM_PROVIDER': 'grok'}, clear=True):
+            with self.assertRaises(llm.LLMNotConfigured):
+                llm.load_config()
+
+    def test_azure_foundry_shape(self) -> None:
+        env = {
+            'MARCO_LLM_PROVIDER': 'azure-foundry',
+            'AZURE_FOUNDRY_API_KEY': 'k',
+            'AZURE_FOUNDRY_ENDPOINT': 'https://blessed.services.ai.azure.com/openai/v1',
+            'AZURE_FOUNDRY_MODEL': 'grok-4-fast-reasoning',
+        }
+        with mock.patch.dict('os.environ', env, clear=True):
+            cfg = llm.load_config()
+        self.assertEqual(cfg.provider, 'azure-foundry')
+        self.assertEqual(
+            cfg.url,
+            'https://blessed.services.ai.azure.com/openai/v1/chat/completions',
+        )
+        self.assertEqual(cfg.auth_header, 'Authorization')
+        self.assertEqual(cfg.auth_prefix, 'Bearer ')
+        self.assertEqual(cfg.model, 'grok-4-fast-reasoning')
+
+    def test_azure_foundry_requires_all_three(self) -> None:
+        # Missing model.
+        env = {
+            'MARCO_LLM_PROVIDER': 'azure-foundry',
+            'AZURE_FOUNDRY_API_KEY': 'k',
+            'AZURE_FOUNDRY_ENDPOINT': 'https://x.services.ai.azure.com/openai/v1',
+        }
+        with mock.patch.dict('os.environ', env, clear=True):
+            with self.assertRaises(llm.LLMNotConfigured):
+                llm.load_config()
+
+    def test_unknown_provider_raises(self) -> None:
+        with mock.patch.dict('os.environ', {'MARCO_LLM_PROVIDER': 'bogus'}, clear=True):
             with self.assertRaises(llm.LLMNotConfigured):
                 llm.load_config()
 
@@ -186,7 +220,7 @@ class ChatCompletionTests(unittest.TestCase):
         req = captured[0]
         self.assertEqual(req.headers['authorization'], 'Bearer xai-test')
         body = json.loads(req.read().decode())
-        self.assertEqual(body['model'], 'grok-code-fast-1')
+        self.assertEqual(body['model'], 'grok-4-fast-reasoning')
         self.assertIn('max_tokens', body)
 
     def test_retry_on_503_then_success(self) -> None:

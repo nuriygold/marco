@@ -51,7 +51,10 @@ logger = logging.getLogger(__name__)
 AZURE_DEFAULT_DEPLOYMENT = 'gpt-5.3-chat'
 AZURE_DEFAULT_API_VERSION = '2024-12-01-preview'
 GROK_DEFAULT_BASE_URL = 'https://api.x.ai/v1'
-GROK_DEFAULT_MODEL = 'grok-code-fast-1'
+# Rudolph has Grok 3, Grok 4 Fast Reasoning, and Grok 4 Fast Non-Reasoning.
+# grok-4-fast-reasoning is the best default for Marco — reasoning helps with
+# patch verbatim precision AND plan generation, and "fast" keeps costs sensible.
+GROK_DEFAULT_MODEL = 'grok-4-fast-reasoning'
 
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_MAX_RETRIES = 2
@@ -163,14 +166,54 @@ def _load_grok() -> ProviderConfig:
     )
 
 
+def _load_azure_foundry() -> ProviderConfig:
+    """Azure AI Foundry OpenAI-compatible endpoint.
+
+    Used for Grok-4-Fast, GPT-OSS, Llama, and other non-classic-Azure-OpenAI
+    models that Azure Foundry exposes through its unified OpenAI-compatible
+    v1 API. Different from 'azure-openai' which targets the classic
+    deployment-based API.
+    """
+    api_key = os.environ.get('AZURE_FOUNDRY_API_KEY', '').strip()
+    endpoint = os.environ.get('AZURE_FOUNDRY_ENDPOINT', '').strip().rstrip('/')
+    model = os.environ.get('AZURE_FOUNDRY_MODEL', '').strip()
+    if not api_key or not endpoint or not model:
+        raise LLMNotConfigured(
+            'AZURE_FOUNDRY_API_KEY, AZURE_FOUNDRY_ENDPOINT, and AZURE_FOUNDRY_MODEL '
+            "are required for provider 'azure-foundry'. Set them in /etc/marco/marco.env "
+            'and restart the service. Example endpoint: '
+            'https://myresource.services.ai.azure.com/openai/v1'
+        )
+    url = f'{endpoint}/chat/completions'
+    return ProviderConfig(
+        provider='azure-foundry',
+        api_key=api_key,
+        url=url,
+        model=model,
+        auth_header='Authorization',
+        auth_prefix='Bearer ',
+        tokens_field=_pick_tokens_field(model),
+        timeout=float(os.environ.get('MARCO_LLM_TIMEOUT', DEFAULT_TIMEOUT)),
+        max_retries=int(os.environ.get('MARCO_LLM_MAX_RETRIES', DEFAULT_MAX_RETRIES)),
+        display={
+            'provider': 'azure-foundry',
+            'endpoint': endpoint,
+            'model': model,
+        },
+    )
+
+
 def load_config() -> ProviderConfig:
     provider = os.environ.get('MARCO_LLM_PROVIDER', 'azure-openai').strip().lower() or 'azure-openai'
-    if provider == 'grok' or provider == 'xai':
+    if provider in ('grok', 'xai'):
         return _load_grok()
+    if provider in ('azure-foundry', 'azure_foundry', 'foundry', 'azure-ai-foundry'):
+        return _load_azure_foundry()
     if provider in ('azure-openai', 'azure_openai', 'azure', 'openai-azure'):
         return _load_azure()
     raise LLMNotConfigured(
-        f'Unknown MARCO_LLM_PROVIDER: {provider!r}. Use "azure-openai" or "grok".'
+        f'Unknown MARCO_LLM_PROVIDER: {provider!r}. '
+        'Use "azure-openai", "azure-foundry", or "grok".'
     )
 
 
