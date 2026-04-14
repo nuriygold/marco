@@ -17,6 +17,7 @@ from .setup import run_setup
 from .tool_pool import assemble_tool_pool
 from .tools import execute_tool, get_tool, get_tools, render_tool_index
 from .mutations import MutationIntent, render_mutation_result, run_mutation_intent
+from .marco_v3.cli import register_v3_parsers, run_v3_command
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -102,12 +103,16 @@ def build_parser() -> argparse.ArgumentParser:
     approve_parser.add_argument('request_id')
     approve_parser.add_argument('--execute', action='store_true', help='apply mutation instead of default dry-run preview')
     approve_parser.add_argument('--yes', action='store_true', help='skip confirmation prompts for high-impact actions')
+    register_v3_parsers(subparsers)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    v3_result = run_v3_command(args)
+    if v3_result is not None:
+        return v3_result
     manifest = build_port_manifest()
     if args.command == 'summary':
         print(QueryEnginePort(manifest).render_summary())

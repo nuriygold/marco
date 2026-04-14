@@ -5,3 +5,5 @@ archive/
 # Claude Code local artifacts
 .claude/settings.local.json
 .claude/sessions/
+.marco/
+.port_sessions/
