@@ -10,6 +10,7 @@ recorded to ``~/.marco/audit.log``.
 
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 from dataclasses import asdict
@@ -666,21 +667,43 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
     async def api_audit(limit: int = 200) -> dict[str, Any]:
         return {'entries': [asdict(e) for e in audit_tail(limit=limit)]}
 
-    # ---------- API: AI (Azure OpenAI) ----------
+    # ---------- Pages: Console ----------
+
+    @app.get('/console', response_class=HTMLResponse)
+    async def console_page(request: Request, conversation: str | None = None) -> HTMLResponse:
+        ws = _require_active_workspace(registry_path)
+        from . import chat_tools
+
+        conversation_id = conversation or 'default'
+        path = chat_tools.conversation_path(_workspace_root(ws), conversation_id)
+        messages = chat_tools.load_chat_messages(path)
+        return templates.TemplateResponse(
+            request,
+            'console.html',
+            _page_context(
+                messages=messages,
+                conversation_id=conversation_id,
+            ),
+        )
+
+    # ---------- API: AI (Azure OpenAI / Grok) ----------
 
     @app.get('/api/ai/status')
     async def api_ai_status() -> dict[str, Any]:
-        """Is Azure OpenAI wired up? Used by UI to enable/disable AI buttons."""
+        """Is an LLM provider wired up? Used by UI to enable/disable AI buttons."""
         from . import llm
 
         configured = llm.is_configured()
         info: dict[str, Any] = {'configured': configured}
         if configured:
             cfg = llm.load_config()
+            # Provider-agnostic payload. For legacy clients we also expose a
+            # best-effort 'deployment' alias pointing at the active model name.
             info.update({
-                'deployment': cfg.deployment,
-                'api_version': cfg.api_version,
-                # Never return the key.
+                'provider': cfg.provider,
+                'model': cfg.model,
+                'deployment': cfg.model,
+                **cfg.display,
             })
         return info
 
@@ -804,6 +827,184 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
                 result['proposal_error'] = str(exc)
 
         return result
+
+    # ---------- API: Chat orchestrator ----------
+
+    CHAT_SYSTEM_PROMPT = (
+        'You are Marco, a practical technical operator serving Rudolph. You help him '
+        'navigate, understand, and safely modify code repositories.\n\n'
+        'You have tools available to inspect the repo, save notes, create session plans, '
+        'and stage patches. Use tools whenever they can help; do not guess facts that a '
+        'tool can verify.\n\n'
+        'Rules:\n'
+        '- When the user asks about the repo, prefer calling workspace_status, find_files, '
+        'or lookup_content over guessing.\n'
+        '- When the user asks to change code, use suggest_patch. The patch will be STAGED '
+        'for their review — it will NOT be applied until they type-confirm from the Patches '
+        'page. Always tell them where to go to apply it.\n'
+        '- When the user says "remember this" or similar, use save_memory.\n'
+        '- When the user describes a development goal, use create_plan to stage a structured plan.\n'
+        '- Be concise. Prefer bullet points and code blocks over prose.\n'
+        '- If a tool returns an error, explain what went wrong and suggest a fix.\n'
+        '- Never apply patches, run scripts, or mutate state outside of the provided tools.'
+    )
+
+    MAX_CHAT_ITERATIONS = 5
+
+    @app.post('/api/ai/chat')
+    async def api_ai_chat(payload: dict[str, Any]) -> dict[str, Any]:
+        """Single-turn chat with tool calling.
+
+        The server runs a short loop: call LLM → if tool_calls, dispatch them →
+        feed results back → call LLM again. Max ``MAX_CHAT_ITERATIONS`` rounds.
+        """
+        from . import chat_tools, llm
+
+        ws = _require_active_workspace(registry_path)
+        root = _workspace_root(ws)
+        storage = _storage_for(ws)
+
+        message = (payload.get('message') or '').strip()
+        if not message:
+            raise HTTPException(status_code=400, detail='message is required')
+        conversation_id = (payload.get('conversation_id') or 'default').strip() or 'default'
+
+        try:
+            cfg = llm.load_config()
+        except llm.LLMNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+
+        chat_path = chat_tools.conversation_path(root, conversation_id)
+        history = chat_tools.load_chat_messages(chat_path)
+
+        # Save the user message to the transcript.
+        user_msg = {'role': 'user', 'content': message}
+        chat_tools.append_chat_message(chat_path, user_msg)
+
+        # Build the conversation for the model. System prompt + prior turns + new user.
+        api_messages: list[dict[str, Any]] = [{'role': 'system', 'content': CHAT_SYSTEM_PROMPT}]
+        for m in history:
+            api_messages.append(m)
+        api_messages.append(user_msg)
+
+        tool_records: list[dict[str, Any]] = []
+
+        try:
+            for _ in range(MAX_CHAT_ITERATIONS):
+                response = llm.chat_completion(
+                    messages=api_messages,
+                    tools=chat_tools.TOOL_SCHEMAS,
+                    tool_choice='auto',
+                    config=cfg,
+                    max_tokens=1500,
+                )
+                choice = (response.get('choices') or [{}])[0]
+                msg = choice.get('message') or {}
+                tool_calls = msg.get('tool_calls') or []
+
+                if not tool_calls:
+                    final_text = msg.get('content') or ''
+                    assistant_msg = {
+                        'role': 'assistant',
+                        'content': final_text,
+                        'tools_used': tool_records,
+                    }
+                    chat_tools.append_chat_message(chat_path, assistant_msg)
+                    audit_record(
+                        'chat.turn',
+                        workspace=ws.name,
+                        params={
+                            'conversation_id': conversation_id,
+                            'tools_used': [r['name'] for r in tool_records],
+                            'tokens': response.get('usage', {}),
+                        },
+                    )
+                    return {
+                        'assistant': assistant_msg,
+                        'conversation_id': conversation_id,
+                        'provider': cfg.provider,
+                        'model': cfg.model,
+                    }
+
+                # Append assistant's tool-call turn to the API conversation.
+                api_messages.append({
+                    'role': 'assistant',
+                    'content': msg.get('content'),
+                    'tool_calls': tool_calls,
+                })
+
+                # Dispatch each tool call and feed results back.
+                for tc in tool_calls:
+                    fn = tc.get('function') or {}
+                    tool_name = fn.get('name') or ''
+                    raw_args = fn.get('arguments') or '{}'
+                    try:
+                        parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except Exception:
+                        parsed_args = {}
+
+                    result = chat_tools.dispatch_tool(
+                        tool_name,
+                        parsed_args,
+                        root=root,
+                        storage=storage,
+                        audit=audit_record,
+                        workspace_name=ws.name,
+                    )
+                    tool_records.append({
+                        'name': tool_name,
+                        'arguments': parsed_args,
+                        'result': result,
+                    })
+                    api_messages.append({
+                        'role': 'tool',
+                        'tool_call_id': tc.get('id'),
+                        'name': tool_name,
+                        'content': json.dumps(result)[:6000],
+                    })
+                # Loop — model now sees the tool results and can respond or call more tools.
+
+            # Exhausted iterations without a final response.
+            fallback = {
+                'role': 'assistant',
+                'content': (
+                    'Reached the tool-call iteration limit without a final answer. '
+                    'Tools used: ' + ', '.join(r['name'] for r in tool_records)
+                ),
+                'tools_used': tool_records,
+            }
+            chat_tools.append_chat_message(chat_path, fallback)
+            return {
+                'assistant': fallback,
+                'conversation_id': conversation_id,
+                'provider': cfg.provider,
+                'model': cfg.model,
+            }
+
+        except llm.LLMError as exc:
+            raise HTTPException(status_code=502, detail=f'LLM error: {exc}')
+
+    @app.get('/api/ai/conversations/{conversation_id}')
+    async def api_get_conversation(conversation_id: str) -> dict[str, Any]:
+        from . import chat_tools
+
+        ws = _require_active_workspace(registry_path)
+        path = chat_tools.conversation_path(_workspace_root(ws), conversation_id)
+        return {
+            'conversation_id': conversation_id,
+            'messages': chat_tools.load_chat_messages(path),
+        }
+
+    @app.delete('/api/ai/conversations/{conversation_id}')
+    async def api_clear_conversation(conversation_id: str) -> dict[str, Any]:
+        from . import chat_tools
+
+        ws = _require_active_workspace(registry_path)
+        path = chat_tools.conversation_path(_workspace_root(ws), conversation_id)
+        if path.exists():
+            path.unlink()
+        audit_record('chat.clear', workspace=ws.name, params={'conversation_id': conversation_id})
+        return {'cleared': conversation_id}
 
     # ---------- First-boot bootstrap ----------
 
