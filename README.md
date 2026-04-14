@@ -69,6 +69,37 @@ export AZURE_OPENAI_API_KEY="..."
 
 This keeps API keys "wrapped" into startup context once per shell session/profile, so you can run `marco ...` (or `python3 -m src.main ...`) without retyping secrets.
 
+
+## Marco shorthand command style
+
+Yes — `marco` can be the everyday shorthand command in your system.
+
+A practical operator pattern is:
+
+```bash
+marco doctor
+marco status
+marco inspect
+marco research
+marco plan
+marco execute
+marco validate
+marco recover
+```
+
+In this repository, those are **workflow verbs** you can wire to the existing Python CLI surface.
+
+Suggested mappings:
+
+- `marco doctor` → environment/setup checks (`python3 -m src.main setup-report`)
+- `marco status` → workspace summary (`python3 -m src.main summary`)
+- `marco inspect` → manifest + inventory checks (`manifest`, `commands`, `tools`)
+- `marco research` → routing/bootstrap exploration (`route`, `bootstrap`)
+- `marco plan` → command/tool selection against a prompt (`route`)
+- `marco execute` → command/tool execution shims (`exec-command`, `exec-tool`)
+- `marco validate` → test + parity passes (`python3 -m unittest ...`, `parity-audit`)
+- `marco recover` → session restore flows (`load-session`)
+
 ## Quickstart
 
 Run summary output:
