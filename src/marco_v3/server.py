@@ -387,7 +387,7 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
 
     # ---------- API: memory ----------
 
-    @app.post('/api/{kind}')
+    @app.post('/api/memory/{kind}')
     async def api_add_memory(kind: str, payload: dict[str, str]) -> dict[str, Any]:
         if kind not in ('note', 'decision', 'convention'):
             raise HTTPException(status_code=404, detail='unknown memory kind')
@@ -402,7 +402,7 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
         audit_record(f'memory.add.{kind}', workspace=ws.name, params={'key': key, 'topic': topic})
         return asdict(entry)
 
-    @app.get('/api/{kind}s')
+    @app.get('/api/memory/{kind}s')
     async def api_list_memory(kind: str, limit: int = 100) -> dict[str, Any]:
         singular = kind.rstrip('s')
         if singular not in ('note', 'decision', 'convention'):
@@ -410,6 +410,31 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
         ws = _require_active_workspace(registry_path)
         storage = _storage_for(ws)
         return {'entries': [asdict(e) for e in list_entries(storage, singular, limit=limit)]}
+
+    # Backwards-compat shims for the pre-refactor routes. Both old and new paths work.
+    @app.post('/api/note')
+    async def api_add_note_compat(payload: dict[str, str]) -> dict[str, Any]:
+        return await api_add_memory('note', payload)
+
+    @app.post('/api/decision')
+    async def api_add_decision_compat(payload: dict[str, str]) -> dict[str, Any]:
+        return await api_add_memory('decision', payload)
+
+    @app.post('/api/convention')
+    async def api_add_convention_compat(payload: dict[str, str]) -> dict[str, Any]:
+        return await api_add_memory('convention', payload)
+
+    @app.get('/api/notes')
+    async def api_list_notes_compat(limit: int = 100) -> dict[str, Any]:
+        return await api_list_memory('notes', limit)
+
+    @app.get('/api/decisions')
+    async def api_list_decisions_compat(limit: int = 100) -> dict[str, Any]:
+        return await api_list_memory('decisions', limit)
+
+    @app.get('/api/conventions')
+    async def api_list_conventions_compat(limit: int = 100) -> dict[str, Any]:
+        return await api_list_memory('conventions', limit)
 
     @app.get('/api/recall')
     async def api_recall(q: str, limit: int = 20) -> dict[str, Any]:
@@ -640,6 +665,145 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
     @app.get('/api/audit')
     async def api_audit(limit: int = 200) -> dict[str, Any]:
         return {'entries': [asdict(e) for e in audit_tail(limit=limit)]}
+
+    # ---------- API: AI (Azure OpenAI) ----------
+
+    @app.get('/api/ai/status')
+    async def api_ai_status() -> dict[str, Any]:
+        """Is Azure OpenAI wired up? Used by UI to enable/disable AI buttons."""
+        from . import llm
+
+        configured = llm.is_configured()
+        info: dict[str, Any] = {'configured': configured}
+        if configured:
+            cfg = llm.load_config()
+            info.update({
+                'deployment': cfg.deployment,
+                'api_version': cfg.api_version,
+                # Never return the key.
+            })
+        return info
+
+    @app.post('/api/ai/plan')
+    async def api_ai_plan(payload: dict[str, str]) -> dict[str, Any]:
+        """Turn a goal into a structured plan using Azure OpenAI."""
+        from . import llm
+
+        goal = (payload.get('goal') or '').strip()
+        if not goal:
+            raise HTTPException(status_code=400, detail='goal is required')
+        ws = _require_active_workspace(registry_path)
+        root = _workspace_root(ws)
+
+        scan = scan_repository(root)
+        summary = {
+            'workspace': ws.name,
+            'file_count': scan.file_count,
+            'top_extensions': dict(list(scan.by_extension.items())[:8]),
+            'top_dirs': list(scan.top_dirs.keys())[:10],
+            'architecture': architecture_map(root),
+            'scripts': [s.name for s in discover_scripts(root)][:20],
+        }
+
+        try:
+            plan = llm.generate_plan(goal, summary)
+        except llm.LLMNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except llm.LLMError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+        # Persist as a Marco session artifact so it shows up on /sessions.
+        storage = _storage_for(ws)
+        artifact = create_plan(root, storage, goal)
+        # Overlay AI plan fields onto the artifact's artifacts dict.
+        from .autonomy import SessionArtifact
+
+        enriched = SessionArtifact(
+            session_id=artifact.session_id,
+            goal=artifact.goal,
+            phase=artifact.phase,
+            status=artifact.status,
+            artifacts={
+                **artifact.artifacts,
+                'ai_plan': plan,
+                'ai_source': 'azure-openai',
+            },
+            created_at=artifact.created_at,
+        )
+        storage.write_json(storage.sessions / f'{artifact.session_id}.json', enriched.__dict__)
+        audit_record(
+            'ai.plan',
+            workspace=ws.name,
+            params={'goal': goal, 'session_id': artifact.session_id},
+        )
+        return asdict(enriched)
+
+    @app.post('/api/ai/patch-suggestion')
+    async def api_ai_patch_suggestion(payload: dict[str, str]) -> dict[str, Any]:
+        """Suggest a patch (name/target/find/replace) from a plain-English description.
+
+        Does NOT apply the patch — returns the suggestion for the user to review,
+        and optionally creates a pending patch proposal they can then confirm + apply
+        from the normal Patches UI.
+        """
+        from . import llm
+
+        description = (payload.get('description') or '').strip()
+        target = (payload.get('target') or '').strip()
+        create_proposal = bool(payload.get('create_proposal', True))
+        if not description or not target:
+            raise HTTPException(status_code=400, detail='description and target are required')
+
+        ws = _require_active_workspace(registry_path)
+        root = _workspace_root(ws)
+        target_path = root / target
+        if not target_path.exists() or not target_path.is_file():
+            raise HTTPException(status_code=400, detail=f'target file does not exist: {target}')
+
+        try:
+            contents = target_path.read_text()
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f'could not read target: {exc}')
+
+        try:
+            suggestion = llm.suggest_patch(description, target, contents)
+        except llm.LLMNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except llm.LLMError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+        audit_record(
+            'ai.patch_suggest',
+            workspace=ws.name,
+            params={'target': target, 'description': description[:200]},
+        )
+
+        result: dict[str, Any] = {'suggestion': suggestion, 'created_proposal': None}
+
+        # Optionally stage it as a pending patch the user can then review + type-confirm.
+        if create_proposal and suggestion.get('find') and suggestion.get('replace') is not None:
+            storage = _storage_for(ws)
+            try:
+                proposal = propose_patch(
+                    storage,
+                    root,
+                    name=suggestion.get('name') or 'ai-suggestion',
+                    target=target,
+                    find_text=suggestion['find'],
+                    replace_text=suggestion['replace'],
+                )
+                audit_record(
+                    'patch.propose',
+                    workspace=ws.name,
+                    params={'name': proposal.name, 'target': target, 'source': 'ai'},
+                    patch_id=proposal.patch_id,
+                )
+                result['created_proposal'] = asdict(proposal)
+            except (FileNotFoundError, ValueError) as exc:
+                # Don't fail the request — just report the suggestion without a proposal.
+                result['proposal_error'] = str(exc)
+
+        return result
 
     # ---------- First-boot bootstrap ----------
 
