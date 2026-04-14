@@ -18,14 +18,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use api::{
     resolve_startup_auth_source, AuthSource, ClawApiClient, ContentBlockDelta, InputContentBlock,
     InputMessage, MessageRequest, MessageResponse, OutputContentBlock, ProviderClient,
-    ProviderKind,
-    StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
+    ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition,
+    ToolResultContentBlock,
 };
 
 use commands::{
     handle_agents_slash_command, handle_plugins_slash_command, handle_skills_slash_command,
     render_slash_command_help, resume_supported_slash_commands, slash_command_specs,
-    suggest_slash_commands, SlashCommand,
+    suggest_slash_commands, DomainCommand, DomainCommandRegistry, SlashCommand,
 };
 use compat_harness::{extract_manifest, UpstreamPaths};
 use init::initialize_repo;
@@ -34,9 +34,9 @@ use render::{MarkdownStreamState, Spinner, TerminalRenderer};
 use runtime::{
     clear_oauth_credentials, generate_pkce_pair, generate_state, load_system_prompt,
     parse_oauth_callback_request_target, save_oauth_credentials, ApiClient, ApiRequest,
-    AssistantEvent, CompactionConfig, ConfigLoader, ConfigSource, ContentBlock,
-    ConversationMessage, ConversationRuntime, ExplicitContextSource, MessageRole,
-    OAuthAuthorizationRequest, OAuthConfig, OAuthTokenExchangeRequest, PermissionMode,
+    AssistantEvent, CommandExecutionMode, CommandExecutionRecord, CompactionConfig, ConfigLoader,
+    ConfigSource, ContentBlock, ConversationMessage, ConversationRuntime, ExplicitContextSource,
+    MessageRole, OAuthAuthorizationRequest, OAuthConfig, OAuthTokenExchangeRequest, PermissionMode,
     PermissionPolicy, ProjectContext, RuntimeError, Session, TokenUsage, ToolError, ToolExecutor,
     UsageTracker,
 };
@@ -64,6 +64,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_TARGET: Option<&str> = option_env!("TARGET");
 const GIT_SHA: Option<&str> = option_env!("GIT_SHA");
 const INTERNAL_PROGRESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
+const COMMAND_ACTIVITY_BUFFER_SIZE: usize = 200;
+const COMMAND_ACTIVITY_TAIL_COUNT: usize = 20;
 
 type AllowedToolSet = BTreeSet<String>;
 
@@ -383,6 +385,15 @@ fn parse_direct_slash_cli_action(rest: &[String]) -> Result<CliAction, String> {
     }
 }
 
+fn render_domain_command_notice(command: &DomainCommand) -> String {
+    format!(
+        "Domain command
+  Status           parsed (mothership_commands_enabled)
+  Action           {command:?}
+  Next             connect this action to deployment-specific handlers"
+    )
+}
+
 fn format_direct_slash_command_error(command: &str, is_unknown: bool) -> String {
     let trimmed = command.trim().trim_start_matches('/');
     let mut lines = vec![
@@ -456,6 +467,26 @@ fn default_permission_mode() -> PermissionMode {
         .as_deref()
         .and_then(normalize_permission_mode)
         .map_or(PermissionMode::DangerFullAccess, permission_mode_from_label)
+}
+
+fn mothership_commands_enabled() -> bool {
+    let cwd = env::current_dir().ok();
+    let config_enabled = cwd
+        .as_ref()
+        .and_then(|dir| ConfigLoader::default_for(dir).load().ok())
+        .and_then(|config| {
+            config
+                .get("mothership_commands_enabled")
+                .and_then(|value| value.as_bool())
+        });
+
+    config_enabled
+        .or_else(|| {
+            env::var("MOTHERSHIP_COMMANDS_ENABLED")
+                .ok()
+                .and_then(|value| value.parse().ok())
+        })
+        .unwrap_or(false)
 }
 
 fn filter_tool_specs(
@@ -820,6 +851,8 @@ struct StatusContext {
     memory_file_count: usize,
     project_root: Option<PathBuf>,
     git_branch: Option<String>,
+    mothership_auth_enabled: bool,
+    mothership_key_source: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1046,25 +1079,49 @@ fn run_resume_command(
                 )),
             })
         }
-        SlashCommand::Status => {
+        SlashCommand::Status { json } => {
             let tracker = UsageTracker::from_session(session);
             let usage = tracker.cumulative_usage();
+            let context = status_context(Some(session_path), &[])?;
             Ok(ResumeCommandOutcome {
                 session: session.clone(),
-                message: Some(format_status_report(
-                    "restored-session",
-                    StatusUsage {
-                        message_count: session.messages.len(),
-                        turns: tracker.turns(),
-                        latest: tracker.current_turn_usage(),
-                        cumulative: usage,
-                        estimated_tokens: 0,
-                    },
-                    default_permission_mode().as_str(),
-                    &status_context(Some(session_path), &[])?,
-                )),
+                message: Some(if *json {
+                    serde_json::to_string_pretty(&build_status_json(
+                        "restored-session",
+                        StatusUsage {
+                            message_count: session.messages.len(),
+                            turns: tracker.turns(),
+                            latest: tracker.current_turn_usage(),
+                            cumulative: usage,
+                            estimated_tokens: 0,
+                        },
+                        default_permission_mode().as_str(),
+                        &context,
+                        &session.command_execution_records,
+                    ))?
+                } else {
+                    format_status_report(
+                        "restored-session",
+                        StatusUsage {
+                            message_count: session.messages.len(),
+                            turns: tracker.turns(),
+                            latest: tracker.current_turn_usage(),
+                            cumulative: usage,
+                            estimated_tokens: 0,
+                        },
+                        default_permission_mode().as_str(),
+                        &context,
+                    )
+                }),
             })
         }
+        SlashCommand::Activity { .. } => Ok(ResumeCommandOutcome {
+            session: session.clone(),
+            message: Some(format_activity_tail_report(
+                &session.command_execution_records,
+                COMMAND_ACTIVITY_TAIL_COUNT,
+            )),
+        }),
         SlashCommand::Cost => {
             let usage = UsageTracker::from_session(session).cumulative_usage();
             Ok(ResumeCommandOutcome {
@@ -1158,8 +1215,12 @@ fn run_repl(
                     cli.persist_session()?;
                     break;
                 }
+                if let Some(domain_command) = cli.domain_commands.parse(trimmed) {
+                    cli.handle_domain_command(domain_command);
+                    continue;
+                }
                 if let Some(command) = SlashCommand::parse(trimmed) {
-                    if cli.handle_repl_command(command)? {
+                    if cli.handle_repl_command(trimmed, command)? {
                         cli.persist_session()?;
                     }
                     continue;
@@ -1200,6 +1261,7 @@ struct LiveCli {
     system_prompt: Vec<String>,
     runtime: ConversationRuntime<DefaultRuntimeClient, CliToolExecutor>,
     session: SessionHandle,
+    domain_commands: DomainCommandRegistry,
 }
 
 impl LiveCli {
@@ -1230,6 +1292,11 @@ impl LiveCli {
             system_prompt,
             runtime,
             session,
+            domain_commands: if mothership_commands_enabled() {
+                DomainCommandRegistry::all_enabled()
+            } else {
+                DomainCommandRegistry::with_enabled(std::iter::empty())
+            },
         };
         cli.persist_session()?;
         Ok(cli)
@@ -1298,6 +1365,7 @@ impl LiveCli {
     }
 
     fn run_turn(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let started = Instant::now();
         let mut spinner = Spinner::new();
         let mut stdout = io::stdout();
         spinner.tick(
@@ -1315,6 +1383,16 @@ impl LiveCli {
                     &mut stdout,
                 )?;
                 println!();
+                self.record_command_execution(
+                    input,
+                    "prompt",
+                    None,
+                    CommandExecutionMode::Executed,
+                    "ok",
+                    started.elapsed().as_millis(),
+                    Some("assistant_response_streamed".to_string()),
+                    None,
+                );
                 self.persist_session()?;
                 Ok(())
             }
@@ -1324,6 +1402,16 @@ impl LiveCli {
                     TerminalRenderer::new().color_theme(),
                     &mut stdout,
                 )?;
+                self.record_command_execution(
+                    input,
+                    "prompt",
+                    None,
+                    CommandExecutionMode::Executed,
+                    "error",
+                    started.elapsed().as_millis(),
+                    None,
+                    Some("runtime_error".to_string()),
+                );
                 Err(Box::new(error))
             }
         }
@@ -1341,6 +1429,7 @@ impl LiveCli {
     }
 
     fn run_prompt_json(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let started = Instant::now();
         let session = self.runtime.session().clone();
         let mut runtime = build_runtime(
             session,
@@ -1355,6 +1444,16 @@ impl LiveCli {
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
         let summary = runtime.run_turn(input, Some(&mut permission_prompter))?;
         self.runtime = runtime;
+        self.record_command_execution(
+            input,
+            "prompt",
+            None,
+            CommandExecutionMode::Executed,
+            "ok",
+            started.elapsed().as_millis(),
+            Some("assistant_response_json".to_string()),
+            None,
+        );
         self.persist_session()?;
         println!(
             "{}",
@@ -1377,15 +1476,22 @@ impl LiveCli {
 
     fn handle_repl_command(
         &mut self,
+        raw_input: &str,
         command: SlashCommand,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        Ok(match command {
+        let started = Instant::now();
+        let target_id = extract_command_target(&command);
+        let outcome = match command {
             SlashCommand::Help => {
                 println!("{}", render_repl_help());
                 false
             }
-            SlashCommand::Status => {
-                self.print_status();
+            SlashCommand::Status { json } => {
+                self.print_status(json);
+                false
+            }
+            SlashCommand::Activity { action } => {
+                self.print_activity(action.as_deref());
                 false
             }
             SlashCommand::Bughunter { scope } => {
@@ -1487,11 +1593,26 @@ impl LiveCli {
                 );
                 false
             }
-            SlashCommand::Unknown(name) => {
+            SlashCommand::Unknown(ref name) => {
                 eprintln!("{}", render_unknown_repl_command(&name));
                 false
             }
-        })
+        };
+        self.record_command_execution(
+            raw_input,
+            classify_command_family(raw_input),
+            target_id,
+            CommandExecutionMode::Executed,
+            "ok",
+            started.elapsed().as_millis(),
+            Some("slash_command_handled".to_string()),
+            None,
+        );
+        Ok(outcome)
+    }
+
+    fn handle_domain_command(&self, command: DomainCommand) {
+        println!("{}", render_domain_command_notice(&command));
     }
 
     fn persist_session(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -1499,23 +1620,80 @@ impl LiveCli {
         Ok(())
     }
 
-    fn print_status(&self) {
+    fn record_command_execution(
+        &mut self,
+        command_text: &str,
+        command_family: impl Into<String>,
+        target_id: Option<String>,
+        execution_mode: CommandExecutionMode,
+        status: &str,
+        latency_ms: u128,
+        response_summary: Option<String>,
+        error_code: Option<String>,
+    ) {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis() as u64);
+        self.runtime.session_mut().push_command_execution_record(
+            CommandExecutionRecord {
+                timestamp,
+                command_text: command_text.to_string(),
+                command_family: command_family.into(),
+                target_id,
+                execution_mode,
+                status: status.to_string(),
+                latency_ms,
+                response_summary,
+                error_code,
+            },
+            COMMAND_ACTIVITY_BUFFER_SIZE,
+        );
+    }
+
+    fn print_status(&self, json_output: bool) {
         let cumulative = self.runtime.usage().cumulative_usage();
         let latest = self.runtime.usage().current_turn_usage();
+        let context = status_context(Some(&self.session.path), &self.context_sources)
+            .expect("status context should load");
+        let usage = StatusUsage {
+            message_count: self.runtime.session().messages.len(),
+            turns: self.runtime.usage().turns(),
+            latest,
+            cumulative,
+            estimated_tokens: self.runtime.estimated_tokens(),
+        };
+        if json_output {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&build_status_json(
+                    &self.model,
+                    usage,
+                    self.permission_mode.as_str(),
+                    &context,
+                    &self.runtime.session().command_execution_records,
+                ))
+                .expect("status json should serialize")
+            );
+        } else {
+            println!(
+                "{}",
+                format_status_report(&self.model, usage, self.permission_mode.as_str(), &context,)
+            );
+        }
+    }
+
+    fn print_activity(&self, action: Option<&str>) {
+        if let Some(action) = action {
+            if action != "tail" {
+                println!("Activity\n  Error            unsupported action '{action}'");
+                return;
+            }
+        }
         println!(
             "{}",
-            format_status_report(
-                &self.model,
-                StatusUsage {
-                    message_count: self.runtime.session().messages.len(),
-                    turns: self.runtime.usage().turns(),
-                    latest,
-                    cumulative,
-                    estimated_tokens: self.runtime.estimated_tokens(),
-                },
-                self.permission_mode.as_str(),
-                &status_context(Some(&self.session.path), &self.context_sources)
-                    .expect("status context should load"),
+            format_activity_tail_report(
+                &self.runtime.session().command_execution_records,
+                COMMAND_ACTIVITY_TAIL_COUNT,
             )
         );
     }
@@ -2193,6 +2371,7 @@ fn status_context(
         ProjectContext::discover_with_git_and_explicit(&cwd, DEFAULT_DATE, context_sources)?;
     let (project_root, git_branch) =
         parse_git_status_metadata(project_context.git_status.as_deref());
+    let mothership = api::mothership_startup_diagnostics();
     Ok(StatusContext {
         cwd,
         session_path: session_path.map(Path::to_path_buf),
@@ -2202,6 +2381,8 @@ fn status_context(
             + project_context.explicit_context_files.len(),
         project_root,
         git_branch,
+        mothership_auth_enabled: mothership.auth_enabled,
+        mothership_key_source: mothership.key_source,
     })
 }
 
@@ -2243,6 +2424,7 @@ fn format_status_report(
   Session file     {}
   Config files     loaded {}/{}
   Memory files     {}
+  Mothership auth  {} (key source: {})
 
 Next
   /help            Browse commands
@@ -2261,6 +2443,12 @@ Next
             context.loaded_config_files,
             context.discovered_config_files,
             context.memory_file_count,
+            if context.mothership_auth_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            context.mothership_key_source,
         ),
     ]
     .join(
@@ -2268,6 +2456,127 @@ Next
 
 ",
     )
+}
+
+fn build_status_json(
+    model: &str,
+    usage: StatusUsage,
+    permission_mode: &str,
+    context: &StatusContext,
+    command_execution_records: &[CommandExecutionRecord],
+) -> serde_json::Value {
+    json!({
+        "session": {
+            "model": model,
+            "permissions": permission_mode,
+            "message_count": usage.message_count,
+            "turns": usage.turns,
+            "estimated_tokens": usage.estimated_tokens,
+        },
+        "usage": {
+            "latest": {
+                "input_tokens": usage.latest.input_tokens,
+                "output_tokens": usage.latest.output_tokens,
+                "cache_creation_input_tokens": usage.latest.cache_creation_input_tokens,
+                "cache_read_input_tokens": usage.latest.cache_read_input_tokens,
+                "total_tokens": usage.latest.total_tokens(),
+            },
+            "cumulative": {
+                "input_tokens": usage.cumulative.input_tokens,
+                "output_tokens": usage.cumulative.output_tokens,
+                "cache_creation_input_tokens": usage.cumulative.cache_creation_input_tokens,
+                "cache_read_input_tokens": usage.cumulative.cache_read_input_tokens,
+                "total_tokens": usage.cumulative.total_tokens(),
+            }
+        },
+        "workspace": {
+            "folder": context.cwd,
+            "project_root": context.project_root,
+            "git_branch": context.git_branch,
+            "session_file": context.session_path,
+            "config_files": {
+                "loaded": context.loaded_config_files,
+                "discovered": context.discovered_config_files,
+            },
+            "memory_files": context.memory_file_count,
+        },
+        "command_execution_records": command_execution_records,
+    })
+}
+
+fn format_activity_tail_report(records: &[CommandExecutionRecord], count: usize) -> String {
+    let mut lines = vec!["Activity".to_string()];
+    if records.is_empty() {
+        lines.push("  Records          none yet".to_string());
+        return lines.join("\n");
+    }
+    let tail_start = records.len().saturating_sub(count);
+    lines.push(format!(
+        "  Records          showing {} of {}",
+        records.len() - tail_start,
+        records.len()
+    ));
+    for record in &records[tail_start..] {
+        lines.push(format!(
+            "  - ts={} family={} status={} latency={}ms target={} mode={:?} command={}",
+            record.timestamp,
+            record.command_family,
+            record.status,
+            record.latency_ms,
+            record.target_id.as_deref().unwrap_or("-"),
+            record.execution_mode,
+            record.command_text
+        ));
+    }
+    lines.join("\n")
+}
+
+fn classify_command_family(raw_input: &str) -> String {
+    let trimmed = raw_input.trim();
+    if !trimmed.starts_with('/') {
+        return "prompt".to_string();
+    }
+    trimmed
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()
+        .unwrap_or("slash")
+        .to_string()
+}
+
+fn extract_command_target(command: &SlashCommand) -> Option<String> {
+    match command {
+        SlashCommand::Session { target, .. }
+        | SlashCommand::Plugins { target, .. }
+        | SlashCommand::Teleport { target } => target.clone(),
+        SlashCommand::Resume { session_path } => session_path.clone(),
+        SlashCommand::Export { path } => path.clone(),
+        SlashCommand::Model { model } => model.clone(),
+        SlashCommand::Permissions { mode } => mode.clone(),
+        SlashCommand::Bughunter { scope } => scope.clone(),
+        SlashCommand::Pr { context }
+        | SlashCommand::Issue { context }
+        | SlashCommand::Ultraplan { task: context }
+        | SlashCommand::CommitPushPr { context } => context.clone(),
+        SlashCommand::Activity { action } => action.clone(),
+        SlashCommand::Status { .. }
+        | SlashCommand::Help
+        | SlashCommand::Compact
+        | SlashCommand::Branch { .. }
+        | SlashCommand::Worktree { .. }
+        | SlashCommand::Commit
+        | SlashCommand::DebugToolCall
+        | SlashCommand::Clear { .. }
+        | SlashCommand::Cost
+        | SlashCommand::Config { .. }
+        | SlashCommand::Memory
+        | SlashCommand::Init
+        | SlashCommand::Diff
+        | SlashCommand::Version
+        | SlashCommand::Agents { .. }
+        | SlashCommand::Skills { .. }
+        | SlashCommand::Unknown(_) => None,
+    }
 }
 
 fn render_config_report(section: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
@@ -3784,7 +4093,7 @@ fn format_edit_result(icon: &str, parsed: &serde_json::Value) -> String {
     let path = extract_tool_path(parsed);
     let suffix = if parsed
         .get("replaceAll")
-        .and_then(serde_json::Value::as_bool)
+        .and_then(|value| value.as_bool())
         .unwrap_or(false)
     {
         " (replace all)"
@@ -4867,6 +5176,8 @@ mod tests {
                 memory_file_count: 4,
                 project_root: Some(PathBuf::from("/tmp")),
                 git_branch: Some("main".to_string()),
+                mothership_auth_enabled: true,
+                mothership_key_source: "env:MOTHERSHIP_V2_KEY",
             },
         );
         assert!(status.contains("Session"));
@@ -4880,6 +5191,7 @@ mod tests {
         assert!(status.contains("Session file     session.json"));
         assert!(status.contains("Config files     loaded 2/3"));
         assert!(status.contains("Memory files     4"));
+        assert!(status.contains("Mothership auth  enabled (key source: env:MOTHERSHIP_V2_KEY)"));
         assert!(status.contains("/session list"));
     }
 

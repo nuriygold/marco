@@ -90,10 +90,21 @@ impl PermissionPolicy {
         &self,
         tool_name: &str,
         input: &str,
+        prompter: Option<&mut dyn PermissionPrompter>,
+    ) -> PermissionOutcome {
+        let required_mode = self.required_mode_for(tool_name);
+        self.authorize_with_required_mode(tool_name, input, required_mode, prompter)
+    }
+
+    #[must_use]
+    pub fn authorize_with_required_mode(
+        &self,
+        tool_name: &str,
+        input: &str,
+        required_mode: PermissionMode,
         mut prompter: Option<&mut dyn PermissionPrompter>,
     ) -> PermissionOutcome {
         let current_mode = self.active_mode();
-        let required_mode = self.required_mode_for(tool_name);
         if current_mode == PermissionMode::Allow || current_mode >= required_mode {
             return PermissionOutcome::Allow;
         }

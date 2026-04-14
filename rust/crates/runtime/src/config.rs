@@ -51,6 +51,9 @@ pub struct RuntimeFeatureConfig {
     mcp: McpConfigCollection,
     oauth: Option<OAuthConfig>,
     model: Option<String>,
+    mothership_base_url: Option<String>,
+    mothership_api_key: Option<String>,
+    mothership_auth_enabled: Option<bool>,
     permission_mode: Option<ResolvedPermissionMode>,
     sandbox: SandboxConfig,
 }
@@ -247,6 +250,21 @@ impl ConfigLoader {
             },
             oauth: parse_optional_oauth_config(&merged_value, "merged settings.oauth")?,
             model: parse_optional_model(&merged_value),
+            mothership_base_url: parse_optional_root_string(
+                &merged_value,
+                "mothershipBaseUrl",
+                "merged settings",
+            )?,
+            mothership_api_key: parse_optional_root_string(
+                &merged_value,
+                "mothershipApiKey",
+                "merged settings",
+            )?,
+            mothership_auth_enabled: parse_optional_root_bool(
+                &merged_value,
+                "mothershipAuthEnabled",
+                "merged settings",
+            )?,
             permission_mode: parse_optional_permission_mode(&merged_value)?,
             sandbox: parse_optional_sandbox_config(&merged_value)?,
         };
@@ -320,6 +338,21 @@ impl RuntimeConfig {
     }
 
     #[must_use]
+    pub fn mothership_base_url(&self) -> Option<&str> {
+        self.feature_config.mothership_base_url.as_deref()
+    }
+
+    #[must_use]
+    pub fn mothership_api_key(&self) -> Option<&str> {
+        self.feature_config.mothership_api_key.as_deref()
+    }
+
+    #[must_use]
+    pub fn mothership_auth_enabled(&self) -> Option<bool> {
+        self.feature_config.mothership_auth_enabled
+    }
+
+    #[must_use]
     pub fn permission_mode(&self) -> Option<ResolvedPermissionMode> {
         self.feature_config.permission_mode
     }
@@ -366,6 +399,21 @@ impl RuntimeFeatureConfig {
     #[must_use]
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
+    }
+
+    #[must_use]
+    pub fn mothership_base_url(&self) -> Option<&str> {
+        self.mothership_base_url.as_deref()
+    }
+
+    #[must_use]
+    pub fn mothership_api_key(&self) -> Option<&str> {
+        self.mothership_api_key.as_deref()
+    }
+
+    #[must_use]
+    pub fn mothership_auth_enabled(&self) -> Option<bool> {
+        self.mothership_auth_enabled
     }
 
     #[must_use]
@@ -554,6 +602,28 @@ fn parse_optional_model(root: &JsonValue) -> Option<String> {
         .and_then(|object| object.get("model"))
         .and_then(JsonValue::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn parse_optional_root_string(
+    root: &JsonValue,
+    key: &str,
+    context: &str,
+) -> Result<Option<String>, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(None);
+    };
+    optional_string(object, key, context).map(|value| value.map(str::to_string))
+}
+
+fn parse_optional_root_bool(
+    root: &JsonValue,
+    key: &str,
+    context: &str,
+) -> Result<Option<bool>, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(None);
+    };
+    optional_bool(object, key, context)
 }
 
 fn parse_optional_hooks_config(root: &JsonValue) -> Result<RuntimeHookConfig, ConfigError> {
@@ -1125,7 +1195,10 @@ mod tests {
                 "callbackPort": 54545,
                 "manualRedirectUrl": "https://console.test/oauth/callback",
                 "scopes": ["org:read", "user:write"]
-              }
+              },
+              "mothershipBaseUrl": "https://mothership.example.test",
+              "mothershipApiKey": "mothership-key",
+              "mothershipAuthEnabled": true
             }"#,
         )
         .expect("write user settings");
@@ -1175,6 +1248,12 @@ mod tests {
         assert_eq!(oauth.client_id, "runtime-client");
         assert_eq!(oauth.callback_port, Some(54_545));
         assert_eq!(oauth.scopes, vec!["org:read", "user:write"]);
+        assert_eq!(
+            loaded.mothership_base_url(),
+            Some("https://mothership.example.test")
+        );
+        assert_eq!(loaded.mothership_api_key(), Some("mothership-key"));
+        assert_eq!(loaded.mothership_auth_enabled(), Some(true));
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }

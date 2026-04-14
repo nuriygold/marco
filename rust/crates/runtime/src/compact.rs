@@ -125,6 +125,7 @@ pub fn compact_session(session: &Session, config: CompactionConfig) -> Compactio
         compacted_session: Session {
             version: session.version,
             messages: compacted_messages,
+            command_execution_records: session.command_execution_records.clone(),
         },
         removed_message_count: removed.len(),
     }
@@ -518,6 +519,7 @@ mod tests {
         let session = Session {
             version: 1,
             messages: vec![ConversationMessage::user_text("hello")],
+            command_execution_records: Vec::new(),
         };
 
         let result = compact_session(&session, CompactionConfig::default());
@@ -545,6 +547,7 @@ mod tests {
                     usage: None,
                 },
             ],
+            command_execution_records: Vec::new(),
         };
 
         let result = compact_session(
@@ -594,6 +597,7 @@ mod tests {
                     text: "Next: preserve prior summary context during auto compact.".to_string(),
                 }]),
             ],
+            command_execution_records: Vec::new(),
         };
         let config = CompactionConfig {
             preserve_recent_messages: 2,
@@ -613,6 +617,7 @@ mod tests {
             &Session {
                 version: 1,
                 messages: follow_up_messages,
+                command_execution_records: Vec::new(),
             },
             config,
         );
@@ -659,6 +664,7 @@ mod tests {
                     text: "recent".to_string(),
                 }]),
             ],
+            command_execution_records: Vec::new(),
         };
 
         assert!(!should_compact(

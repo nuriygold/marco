@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
+use std::env;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use runtime::{
-    load_oauth_credentials, save_oauth_credentials, OAuthConfig, OAuthRefreshRequest,
+    load_oauth_credentials, save_oauth_credentials, ConfigLoader, OAuthConfig, OAuthRefreshRequest,
     OAuthTokenExchangeRequest,
 };
 use serde::Deserialize;
@@ -20,6 +21,7 @@ const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
 const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(200);
 const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(2);
 const DEFAULT_MAX_RETRIES: u32 = 2;
+const MOTHERSHIP_V2_KEY_HEADER: &str = "x-mothership-v2-key";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthSource {
@@ -110,6 +112,8 @@ pub struct ClawApiClient {
     http: reqwest::Client,
     auth: AuthSource,
     base_url: String,
+    mothership_api_key: Option<String>,
+    mothership_auth_enabled: bool,
     max_retries: u32,
     initial_backoff: Duration,
     max_backoff: Duration,
@@ -118,10 +122,13 @@ pub struct ClawApiClient {
 impl ClawApiClient {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
+        let mothership = load_mothership_settings();
         Self {
             http: reqwest::Client::new(),
             auth: AuthSource::ApiKey(api_key.into()),
-            base_url: DEFAULT_BASE_URL.to_string(),
+            base_url: mothership.base_url,
+            mothership_api_key: mothership.api_key,
+            mothership_auth_enabled: mothership.auth_enabled,
             max_retries: DEFAULT_MAX_RETRIES,
             initial_backoff: DEFAULT_INITIAL_BACKOFF,
             max_backoff: DEFAULT_MAX_BACKOFF,
@@ -130,10 +137,13 @@ impl ClawApiClient {
 
     #[must_use]
     pub fn from_auth(auth: AuthSource) -> Self {
+        let mothership = load_mothership_settings();
         Self {
             http: reqwest::Client::new(),
             auth,
-            base_url: DEFAULT_BASE_URL.to_string(),
+            base_url: mothership.base_url,
+            mothership_api_key: mothership.api_key,
+            mothership_auth_enabled: mothership.auth_enabled,
             max_retries: DEFAULT_MAX_RETRIES,
             initial_backoff: DEFAULT_INITIAL_BACKOFF,
             max_backoff: DEFAULT_MAX_BACKOFF,
@@ -178,6 +188,13 @@ impl ClawApiClient {
     #[must_use]
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_mothership_auth(mut self, enabled: bool, api_key: Option<String>) -> Self {
+        self.mothership_auth_enabled = enabled;
+        self.mothership_api_key = api_key.filter(|value| !value.is_empty());
         self
     }
 
@@ -322,6 +339,11 @@ impl ClawApiClient {
             .header("anthropic-version", ANTHROPIC_VERSION)
             .header("content-type", "application/json");
         let mut request_builder = self.auth.apply(request_builder);
+        if self.mothership_auth_enabled {
+            if let Some(key) = &self.mothership_api_key {
+                request_builder = request_builder.header(MOTHERSHIP_V2_KEY_HEADER, key);
+            }
+        }
 
         request_builder = request_builder.json(request);
         request_builder.send().await.map_err(ApiError::from)
@@ -501,9 +523,9 @@ fn now_unix_timestamp() -> u64 {
 }
 
 fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
-    match std::env::var(key) {
+    match env::var(key) {
         Ok(value) if !value.is_empty() => Ok(Some(value)),
-        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
+        Ok(_) | Err(env::VarError::NotPresent) => Ok(None),
         Err(error) => Err(ApiError::from(error)),
     }
 }
@@ -529,7 +551,88 @@ fn read_auth_token() -> Option<String> {
 
 #[must_use]
 pub fn read_base_url() -> String {
-    std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
+    load_mothership_settings().base_url
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MothershipStartupDiagnostics {
+    pub auth_enabled: bool,
+    pub key_source: &'static str,
+}
+
+#[must_use]
+pub fn mothership_startup_diagnostics() -> MothershipStartupDiagnostics {
+    let settings = load_mothership_settings();
+    MothershipStartupDiagnostics {
+        auth_enabled: settings.auth_enabled,
+        key_source: settings.key_source,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MothershipSettings {
+    base_url: String,
+    api_key: Option<String>,
+    auth_enabled: bool,
+    key_source: &'static str,
+}
+
+fn load_mothership_settings() -> MothershipSettings {
+    let config = env::current_dir()
+        .ok()
+        .and_then(|cwd| ConfigLoader::default_for(cwd).load().ok());
+
+    let base_url = config
+        .as_ref()
+        .and_then(|cfg| cfg.mothership_base_url())
+        .map(str::to_string)
+        .or_else(|| {
+            env::var("MOTHERSHIP_BASE_URL")
+                .ok()
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            env::var("ANTHROPIC_BASE_URL")
+                .ok()
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+
+    let (api_key, key_source) = if let Some(value) = config
+        .as_ref()
+        .and_then(|cfg| cfg.mothership_api_key())
+        .filter(|value| !value.is_empty())
+    {
+        (Some(value.to_string()), "config")
+    } else if let Ok(Some(value)) = read_env_non_empty("MOTHERSHIP_V2_KEY") {
+        (Some(value), "env:MOTHERSHIP_V2_KEY")
+    } else {
+        (None, "unset")
+    };
+
+    let auth_enabled = config
+        .as_ref()
+        .and_then(|cfg| cfg.mothership_auth_enabled())
+        .or_else(|| env_bool("MOTHERSHIP_AUTH_ENABLED"))
+        .unwrap_or(false);
+
+    MothershipSettings {
+        base_url,
+        api_key,
+        auth_enabled,
+        key_source,
+    }
+}
+
+fn env_bool(key: &str) -> Option<bool> {
+    env::var(key).ok().and_then(|value| {
+        let normalized = value.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        }
+    })
 }
 
 fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
