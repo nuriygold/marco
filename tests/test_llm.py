@@ -111,7 +111,7 @@ class UrlBuildingTests(unittest.TestCase):
         self.assertEqual(cfg.url, 'https://api.x.ai/v1/chat/completions')
         self.assertEqual(cfg.auth_header, 'Authorization')
         self.assertEqual(cfg.auth_prefix, 'Bearer ')
-        self.assertEqual(cfg.model, 'grok-4-fast-non-reasoning')
+        self.assertEqual(cfg.model, 'grok-4-1-fast-reasoning')
 
     def test_grok_requires_key(self) -> None:
         with mock.patch.dict('os.environ', {'MARCO_LLM_PROVIDER': 'grok'}, clear=True):

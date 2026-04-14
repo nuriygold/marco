@@ -90,7 +90,7 @@ function marcoChatRenderMessage(msg) {
   wrap.className = 'flex ' + (msg.role === 'user' ? 'justify-end' : 'justify-start');
 
   const bubble = document.createElement('div');
-  bubble.className = 'max-w-3xl rounded-lg px-3 py-2 text-sm ' + (
+  bubble.className = 'max-w-[85%] rounded-lg px-3 py-2 text-sm ' + (
     msg.role === 'user' ? 'bg-emerald-500/15 text-emerald-100' :
     msg.role === 'assistant' ? 'bg-slate-800 text-slate-100' :
     'bg-amber-500/10 text-amber-200 text-xs'
@@ -129,6 +129,110 @@ function marcoChatRenderMessage(msg) {
   return wrap;
 }
 
+// Internal helper — streams /api/ai/chat into an existing assistant bubble.
+// extra: optional flags like {lite: true} or {force_heavy: true}.
+async function _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, sendBtn, input, extra) {
+  statusEl.classList.remove('hidden');
+  sendBtn.disabled = true;
+  input.disabled = true;
+
+  // Reset bubble state for re-use (banner → spinner on re-submit).
+  bodyEl.className = 'whitespace-pre-wrap';
+  bodyEl.textContent = '…';
+  toolsEl.innerHTML = '';
+
+  const transcript = document.getElementById('marco-chat-transcript');
+
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        conversation_id: convId,
+        ...extra,
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || res.statusText);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop();
+      for (const evt of events) {
+        const { event: evtName, data } = parseSSE(evt);
+        if (evtName === 'lite') {
+          // Light task detected — offer fast mode without spending reasoning tokens.
+          bodyEl.className = 'text-sm text-slate-300';
+          bodyEl.innerHTML =
+            'Simple lookup — take my thinking cap off? ' +
+            '<button class="ml-2 rounded bg-violet-500/30 px-2 py-1 text-xs text-violet-100 hover:bg-violet-500/50 focus:outline-none">Yes, go fast</button>' +
+            '<button class="ml-1 rounded bg-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-600 focus:outline-none">No, keep thinking</button>';
+          const [yesBtn, noBtn] = bodyEl.querySelectorAll('button');
+          yesBtn.onclick = () => _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, sendBtn, input, { lite: true });
+          noBtn.onclick  = () => _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, sendBtn, input, { force_heavy: true });
+          // Re-enable controls while user decides.
+          sendBtn.disabled = false;
+          input.disabled = false;
+          statusEl.classList.add('hidden');
+          return;
+        } else if (evtName === 'tool') {
+          const t = JSON.parse(data);
+          const d = document.createElement('details');
+          d.className = 'rounded bg-slate-950/60 p-2 text-xs';
+          const s = document.createElement('summary');
+          s.className = 'cursor-pointer font-mono text-violet-300';
+          s.textContent = '🔧 ' + t.name;
+          d.appendChild(s);
+          const pre = document.createElement('pre');
+          pre.className = 'mt-2 overflow-auto text-[11px] text-slate-400';
+          pre.textContent = JSON.stringify(t.result, null, 2);
+          d.appendChild(pre);
+          toolsEl.appendChild(d);
+        } else if (evtName === 'done') {
+          const msg = JSON.parse(data);
+          bodyEl.textContent = msg.content || '';
+          toolsEl.innerHTML = '';
+          (msg.tools_used || []).forEach(t => {
+            const d = document.createElement('details');
+            d.className = 'rounded bg-slate-950/60 p-2 text-xs';
+            const s = document.createElement('summary');
+            s.className = 'cursor-pointer font-mono text-violet-300';
+            s.textContent = '🔧 ' + t.name;
+            d.appendChild(s);
+            const pre = document.createElement('pre');
+            pre.className = 'mt-2 overflow-auto text-[11px] text-slate-400';
+            pre.textContent = JSON.stringify(t.result, null, 2);
+            d.appendChild(pre);
+            toolsEl.appendChild(d);
+          });
+        } else if (evtName === 'error') {
+          const err = JSON.parse(data);
+          bodyEl.textContent = 'Error: ' + err.message;
+          bodyEl.className += ' text-red-400';
+        }
+        transcript.scrollTop = transcript.scrollHeight;
+      }
+    }
+  } catch (e) {
+    bodyEl.textContent = 'Error: ' + e.message;
+    bodyEl.className += ' text-red-400';
+  } finally {
+    sendBtn.disabled = false;
+    input.disabled = false;
+    statusEl.classList.add('hidden');
+    input.focus();
+  }
+}
+
 async function marcoChatSend(event) {
   if (event) event.preventDefault();
   const input = document.getElementById('marco-chat-input');
@@ -139,42 +243,32 @@ async function marcoChatSend(event) {
   const message = input.value.trim();
   if (!message) return false;
 
+  const convId = window.MARCO_CONVERSATION_ID || 'default';
+
   // Echo user message immediately.
   transcript.appendChild(marcoChatRenderMessage({ role: 'user', content: message }));
   transcript.scrollTop = transcript.scrollHeight;
-
   input.value = '';
-  input.disabled = true;
-  sendBtn.disabled = true;
-  statusEl.classList.remove('hidden');
 
-  try {
-    const res = await fetch('/api/ai/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message,
-        conversation_id: window.MARCO_CONVERSATION_ID || 'default',
-      }),
-    });
-    if (!res.ok) {
-      const detail = await res.json().catch(() => ({}));
-      throw new Error(detail.detail || res.statusText);
-    }
-    const data = await res.json();
-    transcript.appendChild(marcoChatRenderMessage(data.assistant));
-    transcript.scrollTop = transcript.scrollHeight;
-  } catch (e) {
-    transcript.appendChild(marcoChatRenderMessage({
-      role: 'system',
-      content: 'Error: ' + e.message,
-    }));
-  } finally {
-    input.disabled = false;
-    sendBtn.disabled = false;
-    statusEl.classList.add('hidden');
-    input.focus();
-  }
+  // Create the assistant bubble once — _marcoChatStream fills it in.
+  const assistantWrap = document.createElement('div');
+  assistantWrap.className = 'flex justify-start';
+  const assistantBubble = document.createElement('div');
+  assistantBubble.className = 'max-w-[85%] rounded-lg px-3 py-2 text-sm bg-slate-800 text-slate-100';
+  const roleLabel = document.createElement('div');
+  roleLabel.className = 'mb-1 text-[10px] uppercase tracking-wider opacity-60';
+  roleLabel.textContent = 'assistant';
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'whitespace-pre-wrap';
+  bodyEl.textContent = '…';
+  const toolsEl = document.createElement('div');
+  toolsEl.className = 'mt-2 space-y-1';
+  assistantBubble.append(roleLabel, bodyEl, toolsEl);
+  assistantWrap.appendChild(assistantBubble);
+  transcript.appendChild(assistantWrap);
+  transcript.scrollTop = transcript.scrollHeight;
+
+  await _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, sendBtn, input, {});
   return false;
 }
 
