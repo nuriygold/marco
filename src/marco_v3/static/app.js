@@ -148,6 +148,24 @@ async function marcoChatSend(event) {
   sendBtn.disabled = true;
   statusEl.classList.remove('hidden');
 
+  // Create a live assistant bubble that we update as SSE events arrive.
+  const assistantWrap = document.createElement('div');
+  assistantWrap.className = 'flex justify-start';
+  const assistantBubble = document.createElement('div');
+  assistantBubble.className = 'max-w-[85%] rounded-lg px-3 py-2 text-sm bg-slate-800 text-slate-100';
+  const roleLabel = document.createElement('div');
+  roleLabel.className = 'mb-1 text-[10px] uppercase tracking-wider opacity-60';
+  roleLabel.textContent = 'assistant';
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'whitespace-pre-wrap';
+  bodyEl.textContent = '…';
+  const toolsEl = document.createElement('div');
+  toolsEl.className = 'mt-2 space-y-1';
+  assistantBubble.append(roleLabel, bodyEl, toolsEl);
+  assistantWrap.appendChild(assistantBubble);
+  transcript.appendChild(assistantWrap);
+  transcript.scrollTop = transcript.scrollHeight;
+
   try {
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
@@ -161,14 +179,60 @@ async function marcoChatSend(event) {
       const detail = await res.json().catch(() => ({}));
       throw new Error(detail.detail || res.statusText);
     }
-    const data = await res.json();
-    transcript.appendChild(marcoChatRenderMessage(data.assistant));
-    transcript.scrollTop = transcript.scrollHeight;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop();
+      for (const evt of events) {
+        const { event: evtName, data } = parseSSE(evt);
+        if (evtName === 'tool') {
+          const t = JSON.parse(data);
+          const d = document.createElement('details');
+          d.className = 'rounded bg-slate-950/60 p-2 text-xs';
+          const s = document.createElement('summary');
+          s.className = 'cursor-pointer font-mono text-violet-300';
+          s.textContent = '🔧 ' + t.name;
+          d.appendChild(s);
+          const pre = document.createElement('pre');
+          pre.className = 'mt-2 overflow-auto text-[11px] text-slate-400';
+          pre.textContent = JSON.stringify(t.result, null, 2);
+          d.appendChild(pre);
+          toolsEl.appendChild(d);
+        } else if (evtName === 'done') {
+          const msg = JSON.parse(data);
+          bodyEl.textContent = msg.content || '';
+          // Rebuild tools from the final message (may differ from live tool events).
+          toolsEl.innerHTML = '';
+          (msg.tools_used || []).forEach(t => {
+            const d = document.createElement('details');
+            d.className = 'rounded bg-slate-950/60 p-2 text-xs';
+            const s = document.createElement('summary');
+            s.className = 'cursor-pointer font-mono text-violet-300';
+            s.textContent = '🔧 ' + t.name;
+            d.appendChild(s);
+            const pre = document.createElement('pre');
+            pre.className = 'mt-2 overflow-auto text-[11px] text-slate-400';
+            pre.textContent = JSON.stringify(t.result, null, 2);
+            d.appendChild(pre);
+            toolsEl.appendChild(d);
+          });
+        } else if (evtName === 'error') {
+          const err = JSON.parse(data);
+          bodyEl.textContent = 'Error: ' + err.message;
+          bodyEl.className += ' text-red-400';
+        }
+        transcript.scrollTop = transcript.scrollHeight;
+      }
+    }
   } catch (e) {
-    transcript.appendChild(marcoChatRenderMessage({
-      role: 'system',
-      content: 'Error: ' + e.message,
-    }));
+    bodyEl.textContent = 'Error: ' + e.message;
+    bodyEl.className += ' text-red-400';
   } finally {
     input.disabled = false;
     sendBtn.disabled = false;

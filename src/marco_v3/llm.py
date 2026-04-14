@@ -51,11 +51,11 @@ logger = logging.getLogger(__name__)
 AZURE_DEFAULT_DEPLOYMENT = 'gpt-5.3-chat'
 AZURE_DEFAULT_API_VERSION = '2024-12-01-preview'
 GROK_DEFAULT_BASE_URL = 'https://api.x.ai/v1'
-# Rudolph has Grok 3, Grok 4 Fast Reasoning, and Grok 4 Fast Non-Reasoning.
-# grok-4-fast-non-reasoning is the default — noticeably faster and cheaper
+# Rudolph has Grok 4.1 Fast Reasoning and Grok 4.1 Fast Non-Reasoning.
+# grok-4-1-fast-non-reasoning is the default — noticeably faster and cheaper
 # than the reasoning variant, with a small tradeoff on patch precision.
-# Set XAI_MODEL=grok-4-fast-reasoning when doing patch-heavy work.
-GROK_DEFAULT_MODEL = 'grok-4-fast-non-reasoning'
+# Set XAI_MODEL=grok-4-1-fast-reasoning when doing patch-heavy work.
+GROK_DEFAULT_MODEL = 'grok-4-1-fast-non-reasoning'
 
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_MAX_RETRIES = 2

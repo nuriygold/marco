@@ -20,8 +20,45 @@
   </script>
 </head>
 <body class="h-full font-sans antialiased">
+  <!-- Mobile full-screen nav drawer (hidden by default) -->
+  <aside id="marco-mobile-nav" class="fixed inset-0 z-40 hidden flex-col bg-slate-900 p-4 md:hidden">
+    <div class="mb-4 flex items-center justify-between">
+      <div>
+        <div class="text-xl font-semibold tracking-tight">Marco</div>
+        <div class="text-xs text-slate-400">operator console</div>
+      </div>
+      <button onclick="marcoNavClose()" class="rounded p-2 text-slate-400 hover:text-white" aria-label="Close menu">✕</button>
+    </div>
+
+    {% include 'components/workspace_switcher.html' %}
+
+    <nav class="mt-6 space-y-1 text-sm">
+      {% set nav = [
+        ('/console', '✨ Console'),
+        ('/', 'Dashboard'),
+        ('/repo', 'Repo'),
+        ('/memory', 'Memory'),
+        ('/sessions', 'Sessions'),
+        ('/patches', 'Patches'),
+        ('/scripts', 'Scripts'),
+        ('/audit', 'Audit log')
+      ] %}
+      {% for href, label in nav %}
+        <a href="{{ href }}" onclick="marcoNavClose()"
+           class="block rounded px-3 py-2 transition {% if request.url.path == href or (href != '/' and request.url.path.startswith(href)) %}bg-emerald-500/10 text-emerald-300{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+          {{ label }}
+        </a>
+      {% endfor %}
+    </nav>
+
+    <form action="/logout" method="post" class="mt-10">
+      <button class="text-xs text-slate-500 hover:text-slate-300">Sign out</button>
+    </form>
+  </aside>
+
   <div class="flex min-h-screen">
-    <aside class="w-60 shrink-0 border-r border-slate-800 bg-slate-900/80 p-4">
+    <!-- Desktop sidebar (hidden on mobile) -->
+    <aside class="hidden w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900/80 p-4 md:flex">
       <a href="/" class="block">
         <div class="text-xl font-semibold tracking-tight">Marco</div>
         <div class="text-xs text-slate-400">operator console</div>
@@ -53,12 +90,20 @@
       </form>
     </aside>
 
-    <main class="flex-1 px-8 py-6">
+    <main class="flex-1 px-3 py-4 md:px-8 md:py-6">
       <div class="mx-auto max-w-6xl">
-        <header class="mb-6 flex items-end justify-between">
-          <div>
-            <h1 class="text-2xl font-semibold">{% block heading %}{% endblock %}</h1>
-            <p class="text-sm text-slate-400">{% block subheading %}{% endblock %}</p>
+        <header class="mb-4 flex items-end justify-between md:mb-6">
+          <div class="flex items-center gap-3">
+            <!-- Hamburger: mobile only -->
+            <button onclick="marcoNavOpen()" class="rounded p-1 text-slate-400 hover:text-white md:hidden" aria-label="Open menu">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <div>
+              <h1 class="text-xl font-semibold md:text-2xl">{% block heading %}{% endblock %}</h1>
+              <p class="text-xs text-slate-400 md:text-sm">{% block subheading %}{% endblock %}</p>
+            </div>
           </div>
           <div class="text-xs text-slate-500">
             {% if active %}workspace: <span class="font-mono text-slate-300">{{ active.name }}</span>{% endif %}
@@ -68,6 +113,19 @@
       </div>
     </main>
   </div>
+
+  <script>
+    function marcoNavOpen() {
+      const nav = document.getElementById('marco-mobile-nav');
+      nav.classList.remove('hidden');
+      nav.classList.add('flex');
+    }
+    function marcoNavClose() {
+      const nav = document.getElementById('marco-mobile-nav');
+      nav.classList.add('hidden');
+      nav.classList.remove('flex');
+    }
+  </script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

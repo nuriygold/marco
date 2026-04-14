@@ -10,12 +10,14 @@ recorded to ``~/.marco/audit.log``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 import subprocess
+import threading
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -852,14 +854,22 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
     MAX_CHAT_ITERATIONS = 5
 
     @app.post('/api/ai/chat')
-    async def api_ai_chat(payload: dict[str, Any]) -> dict[str, Any]:
-        """Single-turn chat with tool calling.
+    async def api_ai_chat(payload: dict[str, Any]) -> StreamingResponse:
+        """Single-turn chat with tool calling, streamed as SSE.
 
         The server runs a short loop: call LLM → if tool_calls, dispatch them →
         feed results back → call LLM again. Max ``MAX_CHAT_ITERATIONS`` rounds.
+
+        SSE events emitted:
+          start  {}
+          tool   {"name": str, "result": any}   (one per tool call)
+          done   assistant message dict
+          error  {"message": str}
         """
         from . import chat_tools, llm
 
+        # Validate inputs eagerly (before spawning the thread) so we can still
+        # raise a synchronous HTTP error for missing/bad payloads.
         ws = _require_active_workspace(registry_path)
         root = _workspace_root(ws)
         storage = _storage_for(ws)
@@ -874,115 +884,128 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
         except llm.LLMNotConfigured as exc:
             raise HTTPException(status_code=503, detail=str(exc))
 
-        chat_path = chat_tools.conversation_path(root, conversation_id)
-        history = chat_tools.load_chat_messages(chat_path)
+        async def generate() -> AsyncIterator[str]:
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            loop = asyncio.get_event_loop()
 
-        # Save the user message to the transcript.
-        user_msg = {'role': 'user', 'content': message}
-        chat_tools.append_chat_message(chat_path, user_msg)
+            def emit(event: str, data: Any) -> None:
+                loop.call_soon_threadsafe(queue.put_nowait, format_sse(event, data))
 
-        # Build the conversation for the model. System prompt + prior turns + new user.
-        api_messages: list[dict[str, Any]] = [{'role': 'system', 'content': CHAT_SYSTEM_PROMPT}]
-        for m in history:
-            api_messages.append(m)
-        api_messages.append(user_msg)
+            def run() -> None:
+                try:
+                    chat_path = chat_tools.conversation_path(root, conversation_id)
+                    history = chat_tools.load_chat_messages(chat_path)
 
-        tool_records: list[dict[str, Any]] = []
+                    user_msg = {'role': 'user', 'content': message}
+                    chat_tools.append_chat_message(chat_path, user_msg)
 
-        try:
-            for _ in range(MAX_CHAT_ITERATIONS):
-                response = llm.chat_completion(
-                    messages=api_messages,
-                    tools=chat_tools.TOOL_SCHEMAS,
-                    tool_choice='auto',
-                    config=cfg,
-                    max_tokens=1500,
-                )
-                choice = (response.get('choices') or [{}])[0]
-                msg = choice.get('message') or {}
-                tool_calls = msg.get('tool_calls') or []
+                    api_messages: list[dict[str, Any]] = [
+                        {'role': 'system', 'content': CHAT_SYSTEM_PROMPT}
+                    ]
+                    for m in history:
+                        api_messages.append(m)
+                    api_messages.append(user_msg)
 
-                if not tool_calls:
-                    final_text = msg.get('content') or ''
-                    assistant_msg = {
+                    tool_records: list[dict[str, Any]] = []
+                    emit('start', {})
+
+                    for _ in range(MAX_CHAT_ITERATIONS):
+                        response = llm.chat_completion(
+                            messages=api_messages,
+                            tools=chat_tools.TOOL_SCHEMAS,
+                            tool_choice='auto',
+                            config=cfg,
+                            max_tokens=1500,
+                        )
+                        choice = (response.get('choices') or [{}])[0]
+                        msg = choice.get('message') or {}
+                        tool_calls = msg.get('tool_calls') or []
+
+                        if not tool_calls:
+                            final_text = msg.get('content') or ''
+                            assistant_msg = {
+                                'role': 'assistant',
+                                'content': final_text,
+                                'tools_used': tool_records,
+                            }
+                            chat_tools.append_chat_message(chat_path, assistant_msg)
+                            audit_record(
+                                'chat.turn',
+                                workspace=ws.name,
+                                params={
+                                    'conversation_id': conversation_id,
+                                    'tools_used': [r['name'] for r in tool_records],
+                                    'tokens': response.get('usage', {}),
+                                },
+                            )
+                            emit('done', assistant_msg)
+                            return
+
+                        api_messages.append({
+                            'role': 'assistant',
+                            'content': msg.get('content'),
+                            'tool_calls': tool_calls,
+                        })
+
+                        for tc in tool_calls:
+                            fn = tc.get('function') or {}
+                            tool_name = fn.get('name') or ''
+                            raw_args = fn.get('arguments') or '{}'
+                            try:
+                                parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                            except Exception:
+                                parsed_args = {}
+
+                            result = chat_tools.dispatch_tool(
+                                tool_name,
+                                parsed_args,
+                                root=root,
+                                storage=storage,
+                                audit=audit_record,
+                                workspace_name=ws.name,
+                            )
+                            tool_records.append({
+                                'name': tool_name,
+                                'arguments': parsed_args,
+                                'result': result,
+                            })
+                            emit('tool', {'name': tool_name, 'result': result})
+                            api_messages.append({
+                                'role': 'tool',
+                                'tool_call_id': tc.get('id'),
+                                'name': tool_name,
+                                'content': json.dumps(result)[:6000],
+                            })
+
+                    # Exhausted iterations without a final text response.
+                    fallback = {
                         'role': 'assistant',
-                        'content': final_text,
+                        'content': (
+                            'Reached the tool-call iteration limit without a final answer. '
+                            'Tools used: ' + ', '.join(r['name'] for r in tool_records)
+                        ),
                         'tools_used': tool_records,
                     }
-                    chat_tools.append_chat_message(chat_path, assistant_msg)
-                    audit_record(
-                        'chat.turn',
-                        workspace=ws.name,
-                        params={
-                            'conversation_id': conversation_id,
-                            'tools_used': [r['name'] for r in tool_records],
-                            'tokens': response.get('usage', {}),
-                        },
-                    )
-                    return {
-                        'assistant': assistant_msg,
-                        'conversation_id': conversation_id,
-                        'provider': cfg.provider,
-                        'model': cfg.model,
-                    }
+                    chat_tools.append_chat_message(chat_path, fallback)
+                    emit('done', fallback)
 
-                # Append assistant's tool-call turn to the API conversation.
-                api_messages.append({
-                    'role': 'assistant',
-                    'content': msg.get('content'),
-                    'tool_calls': tool_calls,
-                })
+                except llm.LLMError as exc:
+                    emit('error', {'message': f'LLM error: {exc}'})
+                except Exception as exc:  # noqa: BLE001
+                    emit('error', {'message': str(exc)})
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
 
-                # Dispatch each tool call and feed results back.
-                for tc in tool_calls:
-                    fn = tc.get('function') or {}
-                    tool_name = fn.get('name') or ''
-                    raw_args = fn.get('arguments') or '{}'
-                    try:
-                        parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                    except Exception:
-                        parsed_args = {}
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+            t.join(timeout=5)
 
-                    result = chat_tools.dispatch_tool(
-                        tool_name,
-                        parsed_args,
-                        root=root,
-                        storage=storage,
-                        audit=audit_record,
-                        workspace_name=ws.name,
-                    )
-                    tool_records.append({
-                        'name': tool_name,
-                        'arguments': parsed_args,
-                        'result': result,
-                    })
-                    api_messages.append({
-                        'role': 'tool',
-                        'tool_call_id': tc.get('id'),
-                        'name': tool_name,
-                        'content': json.dumps(result)[:6000],
-                    })
-                # Loop — model now sees the tool results and can respond or call more tools.
-
-            # Exhausted iterations without a final response.
-            fallback = {
-                'role': 'assistant',
-                'content': (
-                    'Reached the tool-call iteration limit without a final answer. '
-                    'Tools used: ' + ', '.join(r['name'] for r in tool_records)
-                ),
-                'tools_used': tool_records,
-            }
-            chat_tools.append_chat_message(chat_path, fallback)
-            return {
-                'assistant': fallback,
-                'conversation_id': conversation_id,
-                'provider': cfg.provider,
-                'model': cfg.model,
-            }
-
-        except llm.LLMError as exc:
-            raise HTTPException(status_code=502, detail=f'LLM error: {exc}')
+        return StreamingResponse(generate(), media_type='text/event-stream')
 
     @app.get('/api/ai/conversations/{conversation_id}')
     async def api_get_conversation(conversation_id: str) -> dict[str, Any]:
