@@ -15,11 +15,11 @@ Marco is designed with a strong operator personality:
 
 ## Stack status: Python or Rust?
 
-Short answer: **Marco is now Python-first, with an active Rust workspace still present**.
+**Both** — with a clear priority: **Python-first, Rust-secondary**.
 
-- The primary implementation surface and CLI workflow live in `src/` (Python).
-- The `rust/` workspace remains in-repo as a systems-language track.
-- So this repository is **not "no longer Rust"**; it is best described as **Python-first, multi-runtime**.
+- Day-to-day implementation and CLI behavior live in `src/` (Python).
+- The `rust/` workspace is still in this repo as an active systems track.
+- So the accurate label is: **Python-first multi-runtime project (Python + Rust)**.
 
 ## What Marco does
 
@@ -42,6 +42,63 @@ That said, he works best with:
 
 - **OpenAI APIs (especially Codex-oriented workflows)** for reasoning + tool execution quality
 - **structured tool-calling runtimes** where deterministic command routing matters
+
+## Startup command and API keys
+
+The startup surface in this repository is currently Python module entry:
+
+```bash
+python3 -m src.main <command>
+```
+
+If you want a true `marco` terminal command, add a wrapper:
+
+```bash
+alias marco='python3 -m src.main'
+# usage: marco summary
+```
+
+Marco expects provider credentials from your environment (or your keychain/bootstrap flow), for example:
+
+```bash
+export OPENAI_API_KEY="..."
+export ANTHROPIC_API_KEY="..."
+export XAI_API_KEY="..."
+export AZURE_OPENAI_API_KEY="..."
+```
+
+This keeps API keys "wrapped" into startup context once per shell session/profile, so you can run `marco ...` (or `python3 -m src.main ...`) without retyping secrets.
+
+
+## Marco shorthand command style
+
+Yes — `marco` can be the everyday shorthand command in your system.
+
+A practical operator pattern is:
+
+```bash
+marco doctor
+marco status
+marco inspect
+marco research
+marco plan
+marco execute
+marco validate
+marco recover
+```
+
+In this repository, those are **workflow verbs** you can wire to the existing Python CLI surface.
+
+Suggested mappings:
+
+- `marco doctor` → environment/setup checks (`python3 -m src.main setup-report`)
+- `marco status` → workspace summary (`python3 -m src.main summary`)
+- `marco inspect` → manifest + inventory checks (`manifest`, `commands`, `tools`)
+- `marco research` → routing/bootstrap exploration (`route`, `bootstrap`)
+- `marco plan` → command/tool selection against a prompt (`route`)
+- `marco execute` → command/tool execution shims (`exec-command`, `exec-tool`)
+- `marco validate` → test + parity passes (`python3 -m unittest ...`, `parity-audit`)
+- `marco recover` → session restore flows (`load-session`)
 
 ## Quickstart
 
