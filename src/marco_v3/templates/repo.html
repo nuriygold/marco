@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}Repo{% endblock %}
+{% block heading %}Repo{% endblock %}
+{% block subheading %}Lightweight operator toolbox — fast answers about this workspace.{% endblock %}
+
+{% block content %}
+<section class="grid gap-4 md:grid-cols-2">
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <h2 class="mb-3 text-sm font-semibold">Where is this?</h2>
+    <form onsubmit="return marcoLookup(event, 'where')" class="flex gap-2">
+      <input name="q" placeholder="keyword (e.g. 'auth', 'router')"
+             class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-emerald-500" />
+      <button class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Lookup</button>
+    </form>
+    <pre id="marco-where-output" class="mt-3 max-h-64 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-300"></pre>
+  </div>
+
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <h2 class="mb-3 text-sm font-semibold">Find files</h2>
+    <form onsubmit="return marcoFind(event)" class="flex gap-2">
+      <input name="pattern" placeholder='glob e.g. "**/*.py"'
+             class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-emerald-500" />
+      <button class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Find</button>
+    </form>
+    <pre id="marco-find-output" class="mt-3 max-h-64 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-300"></pre>
+  </div>
+</section>
+
+<section class="mt-6 grid gap-4 md:grid-cols-3">
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <h2 class="mb-3 text-sm font-semibold">Scripts</h2>
+    {% if scripts %}
+      <ul class="space-y-1 text-sm">
+        {% for s in scripts %}
+          <li>
+            <a href="/scripts" class="text-emerald-300 hover:underline font-mono">{{ s.name }}</a>
+            <span class="text-xs text-slate-500">({{ s.source }})</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">None detected.</p>
+    {% endif %}
+  </div>
+
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <h2 class="mb-3 text-sm font-semibold">Env vars</h2>
+    {% if env_vars %}
+      <ul class="space-y-1 text-sm">
+        {% for key in env_vars %}
+          <li class="font-mono text-slate-300">{{ key }}</li>
+          {% if loop.index >= 20 %}<li class="text-xs text-slate-500">… {{ env_vars|length - 20 }} more</li>{% break %}{% endif %}
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">None detected.</p>
+    {% endif %}
+  </div>
+
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <h2 class="mb-3 text-sm font-semibold">Routes</h2>
+    {% if routes %}
+      <ul class="space-y-1 text-sm">
+        {% for r in routes %}
+          <li class="font-mono text-slate-300">{{ r.file }}</li>
+          {% if loop.index >= 15 %}<li class="text-xs text-slate-500">… more</li>{% break %}{% endif %}
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">None detected.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="mt-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  <h2 class="mb-3 text-sm font-semibold">Tree</h2>
+  <pre class="max-h-96 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-300">{% for line in tree %}{{ line }}
+{% endfor %}</pre>
+</section>
+{% endblock %}

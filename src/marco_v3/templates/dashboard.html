@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+{% block subheading %}{{ scan.file_count }} files · {{ (scan.total_bytes / 1024)|round(1) }} KB · {{ scan.top_dirs|length }} top-level dirs{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <div class="text-xs uppercase text-slate-400">Pending patches</div>
+    <div class="mt-1 text-3xl font-semibold">{{ pending_patches|length }}</div>
+    <a href="/patches" class="mt-3 inline-block text-xs text-emerald-400 hover:underline">Go to patches →</a>
+  </div>
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <div class="text-xs uppercase text-slate-400">Active sessions</div>
+    <div class="mt-1 text-3xl font-semibold">{{ active_sessions|length }}</div>
+    <a href="/sessions" class="mt-3 inline-block text-xs text-emerald-400 hover:underline">Go to sessions →</a>
+  </div>
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <div class="text-xs uppercase text-slate-400">Top extensions</div>
+    <ul class="mt-2 space-y-0.5 text-sm">
+      {% for ext, count in scan.by_extension.items() %}
+        {% if loop.index <= 5 %}
+          <li class="flex justify-between"><span class="font-mono text-slate-300">{{ ext }}</span><span class="text-slate-500">{{ count }}</span></li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+<section class="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <h2 class="mb-3 text-sm font-semibold text-slate-200">Recent patches</h2>
+    {% if recent_patches %}
+      <ul class="space-y-2 text-sm">
+        {% for p in recent_patches %}
+          <li class="flex items-center justify-between">
+            <a href="/patches/{{ p.patch_id }}" class="truncate text-emerald-300 hover:underline">{{ p.name }}</a>
+            <span class="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">{{ p.status }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No patches yet.</p>
+    {% endif %}
+  </div>
+  <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+    <h2 class="mb-3 text-sm font-semibold text-slate-200">Recent sessions</h2>
+    {% if recent_sessions %}
+      <ul class="space-y-2 text-sm">
+        {% for s in recent_sessions %}
+          <li class="flex items-center justify-between">
+            <span class="truncate">{{ s.goal or s.session_id }}</span>
+            <span class="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">{{ s.phase }}/{{ s.status }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No sessions yet.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

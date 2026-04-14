@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Patches{% endblock %}
+{% block heading %}Patches{% endblock %}
+{% block subheading %}Propose, inspect, apply with typed confirmation, and rollback.{% endblock %}
+
+{% block content %}
+<section class="mb-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  <h2 class="mb-3 text-sm font-semibold">Propose new patch</h2>
+  <form onsubmit="return marcoProposePatch(event)" class="grid gap-3 md:grid-cols-2">
+    <input name="name" placeholder="patch name (unique)" required
+           class="rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700" />
+    <input name="target" placeholder="target file (relative to workspace)" required
+           class="rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700" />
+    <textarea name="find" placeholder="exact text to find (must match exactly once)" required rows="3"
+              class="rounded bg-slate-950 px-3 py-1.5 font-mono text-xs ring-1 ring-slate-700 md:col-span-2"></textarea>
+    <textarea name="replace" placeholder="replacement text" required rows="3"
+              class="rounded bg-slate-950 px-3 py-1.5 font-mono text-xs ring-1 ring-slate-700 md:col-span-2"></textarea>
+    <button class="rounded bg-emerald-500/20 px-3 py-2 text-sm text-emerald-300 hover:bg-emerald-500/30 md:col-span-2">
+      Propose patch
+    </button>
+  </form>
+</section>
+
+<section class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  <h2 class="mb-3 text-sm font-semibold">All patches ({{ patches|length }})</h2>
+  {% if patches %}
+    <ul class="divide-y divide-slate-800">
+      {% for p in patches %}
+        <li class="flex items-center justify-between py-3">
+          <div class="min-w-0">
+            <a href="/patches/{{ p.patch_id }}" class="block truncate font-medium text-emerald-300 hover:underline">
+              {{ p.name }}
+            </a>
+            <div class="mt-0.5 text-[11px] text-slate-500">
+              <span class="font-mono">{{ p.target }}</span> ·
+              <span class="font-mono">{{ p.patch_id }}</span> ·
+              {{ p.created_at[:19] }}
+            </div>
+          </div>
+          <span class="rounded
+            {% if p.status == 'pending' %}bg-amber-500/10 text-amber-300
+            {% elif p.status == 'applied' %}bg-emerald-500/10 text-emerald-300
+            {% else %}bg-slate-700 text-slate-300{% endif %}
+            px-2 py-1 text-[11px]">{{ p.status }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-sm text-slate-500">No patches yet. Propose one above.</p>
+  {% endif %}
+</section>
+{% endblock %}

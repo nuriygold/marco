@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Scripts{% endblock %}
+{% block heading %}Scripts{% endblock %}
+{% block subheading %}Discovered targets. Dry-run by default; execute requires confirm.{% endblock %}
+
+{% block content %}
+<section class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  {% if scripts %}
+    <ul class="divide-y divide-slate-800">
+      {% for s in scripts %}
+        <li class="py-3">
+          <div class="flex items-center justify-between">
+            <div class="min-w-0">
+              <div class="truncate font-mono text-sm text-emerald-300">{{ s.name }}</div>
+              <div class="truncate text-xs text-slate-400">{{ s.command }}</div>
+              <div class="text-[10px] text-slate-500">source: {{ s.source }}</div>
+            </div>
+            <div class="flex gap-2">
+              <button class="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                      onclick="marcoRunScript('{{ s.name }}', false)">Dry-run</button>
+              <button class="rounded bg-amber-500/20 px-3 py-1 text-xs text-amber-200 hover:bg-amber-500/40"
+                      onclick="marcoRunScript('{{ s.name }}', true)">Execute</button>
+            </div>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-sm text-slate-500">No runnable scripts discovered.</p>
+  {% endif %}
+</section>
+
+<section class="mt-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  <h2 class="mb-3 text-sm font-semibold">Live stream</h2>
+  <pre id="marco-script-stream" class="max-h-96 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-300">Pick a script action above.</pre>
+</section>
+{% endblock %}
