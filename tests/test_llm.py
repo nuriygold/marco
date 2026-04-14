@@ -28,13 +28,13 @@ class LoadConfigTests(unittest.TestCase):
         with mock.patch.dict('os.environ', env, clear=True):
             cfg = llm.load_config()
             self.assertEqual(cfg.api_key, 'sk-abc')
-            self.assertEqual(cfg.endpoint, 'https://foo.openai.azure.com')
-            self.assertEqual(cfg.deployment, llm.DEFAULT_DEPLOYMENT)
-            self.assertEqual(cfg.api_version, llm.DEFAULT_API_VERSION)
+            self.assertEqual(cfg.provider, 'azure-openai')
+            self.assertEqual(cfg.model, llm.AZURE_DEFAULT_DEPLOYMENT)
+            self.assertIn('2024-12-01-preview', cfg.url)
 
     def test_sensible_defaults_for_marco_use_case(self) -> None:
         # Default should NOT be gpt-4o-mini — too weak for patch verbatim work.
-        self.assertNotEqual(llm.DEFAULT_DEPLOYMENT, 'gpt-4o-mini')
+        self.assertNotEqual(llm.AZURE_DEFAULT_DEPLOYMENT, 'gpt-4o-mini')
 
     def test_overrides(self) -> None:
         env = {
@@ -45,31 +45,82 @@ class LoadConfigTests(unittest.TestCase):
         }
         with mock.patch.dict('os.environ', env, clear=True):
             cfg = llm.load_config()
-            self.assertEqual(cfg.deployment, 'gpt-4o')
-            self.assertEqual(cfg.api_version, '2024-11-01')
+            self.assertEqual(cfg.model, 'gpt-4o')
+            self.assertIn('2024-11-01', cfg.url)
+
+
+def _azure_cfg(**overrides) -> llm.ProviderConfig:
+    base = dict(
+        provider='azure-openai',
+        api_key='sk-test',
+        url='https://r.openai.azure.com/openai/deployments/gpt-4o-mini/chat/completions?api-version=2024-10-21',
+        model='gpt-4o-mini',
+        auth_header='api-key',
+        auth_prefix='',
+        tokens_field='max_tokens',
+        timeout=5.0,
+        max_retries=2,
+        display={'provider': 'azure-openai'},
+    )
+    base.update(overrides)
+    return llm.ProviderConfig(**base)
+
+
+def _grok_cfg(**overrides) -> llm.ProviderConfig:
+    base = dict(
+        provider='grok',
+        api_key='xai-test',
+        url='https://api.x.ai/v1/chat/completions',
+        model='grok-code-fast-1',
+        auth_header='Authorization',
+        auth_prefix='Bearer ',
+        tokens_field='max_tokens',
+        timeout=5.0,
+        max_retries=2,
+        display={'provider': 'grok'},
+    )
+    base.update(overrides)
+    return llm.ProviderConfig(**base)
 
 
 class UrlBuildingTests(unittest.TestCase):
-    def test_url_shape(self) -> None:
-        cfg = llm.AzureConfig(
-            api_key='k', endpoint='https://r.openai.azure.com',
-            deployment='gpt-4o-mini', api_version='2024-10-21',
-            timeout=30.0, max_retries=2,
-        )
-        url = llm._build_url(cfg)
+    def test_azure_url_shape(self) -> None:
+        env = {
+            'AZURE_OPENAI_API_KEY': 'k',
+            'AZURE_OPENAI_ENDPOINT': 'https://r.cognitiveservices.azure.com',
+            'AZURE_OPENAI_DEPLOYMENT': 'gpt-5.3-chat',
+            'AZURE_OPENAI_API_VERSION': '2024-12-01-preview',
+        }
+        with mock.patch.dict('os.environ', env, clear=True):
+            cfg = llm.load_config()
         self.assertEqual(
-            url,
-            'https://r.openai.azure.com/openai/deployments/gpt-4o-mini'
-            '/chat/completions?api-version=2024-10-21',
+            cfg.url,
+            'https://r.cognitiveservices.azure.com/openai/deployments/gpt-5.3-chat'
+            '/chat/completions?api-version=2024-12-01-preview',
         )
+        self.assertEqual(cfg.auth_header, 'api-key')
+        self.assertEqual(cfg.tokens_field, 'max_completion_tokens')
+
+    def test_grok_url_shape(self) -> None:
+        env = {
+            'MARCO_LLM_PROVIDER': 'grok',
+            'XAI_API_KEY': 'xai-abc',
+        }
+        with mock.patch.dict('os.environ', env, clear=True):
+            cfg = llm.load_config()
+        self.assertEqual(cfg.url, 'https://api.x.ai/v1/chat/completions')
+        self.assertEqual(cfg.auth_header, 'Authorization')
+        self.assertEqual(cfg.auth_prefix, 'Bearer ')
+        self.assertEqual(cfg.model, 'grok-code-fast-1')
+
+    def test_grok_requires_key(self) -> None:
+        with mock.patch.dict('os.environ', {'MARCO_LLM_PROVIDER': 'grok'}, clear=True):
+            with self.assertRaises(llm.LLMNotConfigured):
+                llm.load_config()
 
 
 class ChatCompletionTests(unittest.TestCase):
-    CFG = llm.AzureConfig(
-        api_key='sk-test', endpoint='https://r.openai.azure.com',
-        deployment='gpt-4o-mini', api_version='2024-10-21',
-        timeout=5.0, max_retries=2,
-    )
+    CFG = _azure_cfg()
 
     def _mock_client(self, status: int, body: dict | str) -> httpx.Client:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -93,7 +144,7 @@ class ChatCompletionTests(unittest.TestCase):
             )
         self.assertEqual(res['choices'][0]['message']['content'], '{"ok": true}')
 
-    def test_sends_api_key_header(self) -> None:
+    def test_azure_sends_api_key_header(self) -> None:
         captured: list[httpx.Request] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -113,6 +164,30 @@ class ChatCompletionTests(unittest.TestCase):
             )
         self.assertEqual(captured[0].headers['api-key'], 'sk-test')
         self.assertEqual(captured[0].headers['content-type'], 'application/json')
+
+    def test_grok_sends_bearer_and_model_in_body(self) -> None:
+        captured: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            return httpx.Response(
+                200,
+                json={'choices': [{'message': {'content': '{}'}}]},
+                request=request,
+            )
+
+        transport = httpx.MockTransport(handler)
+        with httpx.Client(transport=transport) as client:
+            llm.chat_completion(
+                messages=[{'role': 'user', 'content': 'hi'}],
+                config=_grok_cfg(),
+                client=client,
+            )
+        req = captured[0]
+        self.assertEqual(req.headers['authorization'], 'Bearer xai-test')
+        body = json.loads(req.read().decode())
+        self.assertEqual(body['model'], 'grok-code-fast-1')
+        self.assertIn('max_tokens', body)
 
     def test_retry_on_503_then_success(self) -> None:
         call_count = {'n': 0}
@@ -171,11 +246,7 @@ class ChatCompletionTests(unittest.TestCase):
 
 
 class HighLevelTests(unittest.TestCase):
-    CFG = llm.AzureConfig(
-        api_key='k', endpoint='https://r.openai.azure.com',
-        deployment='gpt-4o-mini', api_version='2024-10-21',
-        timeout=5.0, max_retries=0,
-    )
+    CFG = _azure_cfg(max_retries=0)
 
     def _client_returning(self, content: str) -> httpx.Client:
         def handler(request: httpx.Request) -> httpx.Response:
