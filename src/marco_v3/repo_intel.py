@@ -173,7 +173,12 @@ def discover_env_vars(root: Path, limit: int = 200) -> dict[str, list[str]]:
         rel = str(path.relative_to(root))
         for pattern in ENV_PATTERNS:
             for match in pattern.findall(content):
-                key = match if isinstance(match, str) else match[0]
+                if isinstance(match, str):
+                    key = match
+                elif isinstance(match, tuple) and match:
+                    key = match[0]
+                else:
+                    continue
                 if rel not in found[key]:
                     found[key].append(rel)
                 if len(found) >= limit:

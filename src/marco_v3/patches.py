@@ -25,7 +25,7 @@ class PatchProposal:
 
 
 def _patch_id(name: str, target: str, timestamp: str) -> str:
-    return hashlib.sha1(f'{name}:{target}:{timestamp}'.encode('utf-8')).hexdigest()[:12]
+    return hashlib.sha256(f'{name}:{target}:{timestamp}'.encode('utf-8')).hexdigest()[:12]
 
 
 def _load(storage: MarcoStorage, patch_id: str) -> PatchProposal:

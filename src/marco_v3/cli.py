@@ -225,8 +225,8 @@ def run_v3_command(args: argparse.Namespace, cwd: Path | None = None) -> int | N
             'cwd': str(root),
             'safety_mode': profile.safety_mode,
             'pause_before_mutation': profile.pause_before_mutation,
-            'python_version': subprocess.run('python3 --version', shell=True, capture_output=True, text=True).stdout.strip(),
-            'git_available': subprocess.run('git --version', shell=True, capture_output=True, text=True).returncode == 0,
+            'python_version': subprocess.run(['python3', '--version'], capture_output=True, text=True).stdout.strip(),
+            'git_available': subprocess.run(['git', '--version'], capture_output=True, text=True).returncode == 0,
             'profile_path': str((root / '.marco/config.json')),
         }
         _print(report, as_json=getattr(args, 'json', False))
@@ -359,7 +359,7 @@ def run_v3_command(args: argparse.Namespace, cwd: Path | None = None) -> int | N
         if not args.execute:
             print(f"[DRY_RUN] {entry.command}")
             return 0
-        proc = subprocess.run(entry.command, cwd=root, shell=True)
+        proc = subprocess.run(shlex.split(entry.command), cwd=root, shell=False)
         return proc.returncode
 
     if args.command == 'script-info':

@@ -12,6 +12,10 @@ class ScaffoldResult:
     created: bool
 
 
+def _to_pascal_case(name: str) -> str:
+    return ''.join(part.capitalize() for part in name.replace('-', '_').split('_') if part)
+
+
 def detect_convention_root(root: Path) -> Path:
     for candidate in ('src', 'app', 'services'):
         path = root / candidate
@@ -38,7 +42,7 @@ def scaffold_page(root: Path, name: str) -> ScaffoldResult:
 def scaffold_component(root: Path, name: str) -> ScaffoldResult:
     base = detect_convention_root(root)
     path = base / 'components' / f'{name}.py'
-    created = _write(path, f'class {name.title().replace("_", "")}:\n    def render(self) -> str:\n        return "{name} component"\n')
+    created = _write(path, f'class {_to_pascal_case(name)}:\n    def render(self) -> str:\n        return "{name} component"\n')
     return ScaffoldResult(kind='component', name=name, path=str(path.relative_to(root)), created=created)
 
 
@@ -52,5 +56,5 @@ def scaffold_route(root: Path, name: str) -> ScaffoldResult:
 def scaffold_service(root: Path, name: str) -> ScaffoldResult:
     base = detect_convention_root(root)
     path = base / 'services' / f'{name}_service.py'
-    created = _write(path, f'class {name.title().replace("_", "")}Service:\n    def run(self) -> str:\n        return "{name} service"\n')
+    created = _write(path, f'class {_to_pascal_case(name)}Service:\n    def run(self) -> str:\n        return "{name} service"\n')
     return ScaffoldResult(kind='service', name=name, path=str(path.relative_to(root)), created=created)
