@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — Marco</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="flex h-full items-center justify-center">
+  <div class="w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900/80 p-8 shadow-xl">
+    <h1 class="text-2xl font-semibold tracking-tight">Marco</h1>
+    <p class="mt-1 text-sm text-slate-400">Operator console · single user</p>
+    <form action="/login" method="post" class="mt-6 space-y-3">
+      <input type="hidden" name="next" value="{{ next }}" />
+      <label class="block">
+        <span class="text-xs uppercase tracking-wide text-slate-400">Access token</span>
+        <input name="token" type="password" autofocus required
+               class="mt-1 w-full rounded bg-slate-950 px-3 py-2 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-emerald-500" />
+      </label>
+      {% if error %}
+        <p class="text-sm text-red-400">{{ error }}</p>
+      {% endif %}
+      <button class="w-full rounded bg-emerald-500/20 px-3 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/30">
+        Sign in
+      </button>
+    </form>
+    <p class="mt-6 text-xs text-slate-500">Token is configured server-side via <code>MARCO_UI_TOKEN</code>.</p>
+  </div>
+</body>
+</html>

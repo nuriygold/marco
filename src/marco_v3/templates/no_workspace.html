@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}No workspace{% endblock %}
+{% block heading %}No active workspace{% endblock %}
+{% block subheading %}Register a repo to start operating.{% endblock %}
+{% block content %}
+<div class="rounded-lg border border-slate-800 bg-slate-900/50 p-6">
+  <p class="text-sm text-slate-300">
+    Marco needs a workspace pointing to a local repo. Use the <strong>Add workspace</strong>
+    form in the sidebar, or call <code class="text-emerald-300">POST /api/workspaces</code> with
+    a <code>name</code> and <code>path</code>.
+  </p>
+</div>
+{% endblock %}

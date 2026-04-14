@@ -1,0 +1,10 @@
+/* Marco UI minimal overrides — Tailwind handles most styling. */
+
+pre {
+  white-space: pre;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Diff coloring inside patch detail pages. */
+pre .diff-add { color: #6ee7b7; }
+pre .diff-del { color: #fda4af; }

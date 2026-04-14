@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Audit log{% endblock %}
+{% block heading %}Audit log{% endblock %}
+{% block subheading %}Last {{ entries|length }} mutations — newest first.{% endblock %}
+
+{% block content %}
+<section class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  {% if entries %}
+    <table class="w-full text-left text-xs">
+      <thead class="text-slate-400">
+        <tr>
+          <th class="py-1">When</th>
+          <th>Workspace</th>
+          <th>Action</th>
+          <th>Result</th>
+          <th>Params / Patch</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+          <tr class="border-t border-slate-800 align-top">
+            <td class="py-1 font-mono text-slate-400">{{ e.ts[:19] }}</td>
+            <td class="text-slate-300">{{ e.workspace }}</td>
+            <td class="font-mono text-emerald-300">{{ e.action }}</td>
+            <td class="{% if e.result != 'ok' %}text-red-300{% else %}text-slate-300{% endif %}">{{ e.result }}</td>
+            <td class="text-slate-400">
+              {% if e.patch_id %}
+                <a href="/patches/{{ e.patch_id }}" class="font-mono text-emerald-300 hover:underline">{{ e.patch_id }}</a>
+                <br />
+              {% endif %}
+              <code class="text-[11px]">{{ e.params }}</code>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-sm text-slate-500">No audit entries yet. Mutations will appear here.</p>
+  {% endif %}
+</section>
+{% endblock %}

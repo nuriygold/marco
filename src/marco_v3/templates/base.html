@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Marco{% endblock %} — Marco</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <link rel="stylesheet" href="/static/app.css" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+</head>
+<body class="h-full font-sans antialiased">
+  <div class="flex min-h-screen">
+    <aside class="w-60 shrink-0 border-r border-slate-800 bg-slate-900/80 p-4">
+      <a href="/" class="block">
+        <div class="text-xl font-semibold tracking-tight">Marco</div>
+        <div class="text-xs text-slate-400">operator console</div>
+      </a>
+
+      {% include 'components/workspace_switcher.html' %}
+
+      <nav class="mt-6 space-y-1 text-sm">
+        {% set nav = [
+          ('/console', '✨ Console'),
+          ('/', 'Dashboard'),
+          ('/repo', 'Repo'),
+          ('/memory', 'Memory'),
+          ('/sessions', 'Sessions'),
+          ('/patches', 'Patches'),
+          ('/scripts', 'Scripts'),
+          ('/audit', 'Audit log')
+        ] %}
+        {% for href, label in nav %}
+          <a href="{{ href }}"
+             class="block rounded px-3 py-2 transition {% if request.url.path == href or (href != '/' and request.url.path.startswith(href)) %}bg-emerald-500/10 text-emerald-300{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+            {{ label }}
+          </a>
+        {% endfor %}
+      </nav>
+
+      <form action="/logout" method="post" class="mt-10">
+        <button class="text-xs text-slate-500 hover:text-slate-300">Sign out</button>
+      </form>
+    </aside>
+
+    <main class="flex-1 px-8 py-6">
+      <div class="mx-auto max-w-6xl">
+        <header class="mb-6 flex items-end justify-between">
+          <div>
+            <h1 class="text-2xl font-semibold">{% block heading %}{% endblock %}</h1>
+            <p class="text-sm text-slate-400">{% block subheading %}{% endblock %}</p>
+          </div>
+          <div class="text-xs text-slate-500">
+            {% if active %}workspace: <span class="font-mono text-slate-300">{{ active.name }}</span>{% endif %}
+          </div>
+        </header>
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

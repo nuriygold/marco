@@ -1,0 +1,23 @@
+# Marco UI — Caddy reverse proxy
+# Replace marco.example.com with your real hostname. Caddy will fetch a
+# Let's Encrypt cert automatically as long as ports 80/443 are open and
+# DNS points at this Droplet.
+
+marco.example.com {
+    encode zstd gzip
+
+    # Long-lived SSE connections need a generous timeout.
+    reverse_proxy 127.0.0.1:8765 {
+        transport http {
+            keepalive 30s
+            response_header_timeout 24h
+        }
+        flush_interval -1
+    }
+
+    # Basic access log.
+    log {
+        output file /var/log/caddy/marco.log
+        format console
+    }
+}

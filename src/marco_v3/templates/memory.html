@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Memory{% endblock %}
+{% block heading %}Memory notebook{% endblock %}
+{% block subheading %}Technical notes, decisions, and conventions. Queried by recall.{% endblock %}
+
+{% block content %}
+<section class="mb-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  <h2 class="mb-3 text-sm font-semibold">Recall</h2>
+  <form onsubmit="return marcoRecall(event)" class="flex gap-2">
+    <input name="q" placeholder="query across notes / decisions / conventions"
+           class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-emerald-500" />
+    <button class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Recall</button>
+  </form>
+  <ul id="marco-recall-output" class="mt-3 space-y-2 text-sm"></ul>
+</section>
+
+<section class="grid gap-4 md:grid-cols-3">
+  {% for kind, entries, label in [('note', notes, 'Notes'), ('decision', decisions, 'Decisions'), ('convention', conventions, 'Conventions')] %}
+    <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <div class="mb-3 flex items-center justify-between">
+        <h2 class="text-sm font-semibold">{{ label }}</h2>
+        <span class="text-xs text-slate-500">{{ entries|length }}</span>
+      </div>
+      <form class="mb-4 space-y-2" onsubmit="return marcoAddMemory(event, '{{ kind }}')">
+        <input name="key" placeholder="key (e.g. db.pool)" required
+               class="w-full rounded bg-slate-950 px-2 py-1 text-xs ring-1 ring-slate-700" />
+        <input name="topic" placeholder="topic" required
+               class="w-full rounded bg-slate-950 px-2 py-1 text-xs ring-1 ring-slate-700" />
+        <textarea name="text" placeholder="details" required rows="2"
+                  class="w-full rounded bg-slate-950 px-2 py-1 text-xs ring-1 ring-slate-700"></textarea>
+        <button class="w-full rounded bg-emerald-500/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/30">
+          Save {{ kind }}
+        </button>
+      </form>
+      <ul class="space-y-2 text-sm">
+        {% for e in entries|reverse %}
+          <li class="rounded bg-slate-950 p-2">
+            <div class="flex justify-between">
+              <span class="font-mono text-emerald-300">{{ e.key }}</span>
+              <span class="text-[10px] text-slate-500">{{ e.topic }}</span>
+            </div>
+            <p class="mt-1 text-xs text-slate-300">{{ e.text }}</p>
+          </li>
+          {% if loop.index >= 30 %}<li class="text-xs text-slate-500">… {{ entries|length - 30 }} older</li>{% break %}{% endif %}
+        {% else %}
+          <li class="text-xs text-slate-500">None yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -103,6 +103,13 @@ def build_parser() -> argparse.ArgumentParser:
     approve_parser.add_argument('request_id')
     approve_parser.add_argument('--execute', action='store_true', help='apply mutation instead of default dry-run preview')
     approve_parser.add_argument('--yes', action='store_true', help='skip confirmation prompts for high-impact actions')
+
+    serve_parser = subparsers.add_parser('serve', help='launch the Marco UI server (FastAPI + HTMX)')
+    serve_parser.add_argument('--host', default='127.0.0.1', help='bind address (default 127.0.0.1; Caddy reverse-proxies to this)')
+    serve_parser.add_argument('--port', type=int, default=8765, help='bind port (default 8765)')
+    serve_parser.add_argument('--workspace', help='auto-register and activate this repo path as the initial workspace')
+    serve_parser.add_argument('--reload', action='store_true', help='enable uvicorn auto-reload for local development')
+
     register_v3_parsers(subparsers)
     return parser
 
@@ -240,8 +247,49 @@ def main(argv: list[str] | None = None) -> int:
         result = run_mutation_intent(intent, confirmed=confirmed)
         print(render_mutation_result(result))
         return 0 if result.status in {'preview', 'success'} else 1
+    if args.command == 'serve':
+        return _run_serve(args)
     parser.error(f'unknown command: {args.command}')
     return 2
+
+
+def _run_serve(args) -> int:  # type: ignore[no-untyped-def]
+    """Launch the Marco UI server. FastAPI/uvicorn imported lazily so the rest
+    of the CLI still works when server deps are not installed."""
+    from pathlib import Path
+
+    try:
+        import uvicorn
+    except ImportError:
+        print('Server dependencies not installed. Run: pip install -r deploy/requirements.txt')
+        return 1
+
+    from .marco_v3.server import create_app
+    from .marco_v3.server_auth import AuthError
+    from .marco_v3.server_workspaces import add_workspace, set_active, load_registry
+
+    if args.workspace:
+        path = Path(args.workspace).expanduser().resolve()
+        registry = load_registry()
+        existing = next((ws for ws in registry.workspaces if Path(ws.path) == path), None)
+        if existing is None:
+            try:
+                add_workspace(path.name or 'workspace', path)
+            except ValueError as exc:
+                print(f'Could not register workspace: {exc}')
+                return 1
+            set_active(path.name or 'workspace')
+        else:
+            set_active(existing.name)
+
+    try:
+        app = create_app()
+    except AuthError as exc:
+        print(str(exc))
+        return 1
+
+    uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
+    return 0
 
 
 if __name__ == '__main__':

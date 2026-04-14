@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block title %}Console{% endblock %}
+{% block heading %}Marco Console{% endblock %}
+{% block subheading %}Ask Marco anything. He routes your request to the right tool and reports back.{% endblock %}
+
+{% block content %}
+<div id="marco-console" class="flex h-[calc(100vh-12rem)] flex-col rounded-lg border border-slate-800 bg-slate-900/40">
+
+  <div id="marco-chat-transcript" class="flex-1 space-y-4 overflow-y-auto p-4">
+    {% if messages %}
+      {% for m in messages %}
+        <div class="flex {% if m.role == 'user' %}justify-end{% else %}justify-start{% endif %}">
+          <div class="max-w-3xl rounded-lg px-3 py-2 text-sm
+                      {% if m.role == 'user' %}bg-emerald-500/15 text-emerald-100
+                      {% elif m.role == 'assistant' %}bg-slate-800 text-slate-100
+                      {% else %}bg-amber-500/10 text-amber-200 text-xs{% endif %}">
+            <div class="mb-1 text-[10px] uppercase tracking-wider opacity-60">{{ m.role }}</div>
+            <div class="whitespace-pre-wrap">{{ m.content or '' }}</div>
+            {% if m.tools_used %}
+              <div class="mt-2 space-y-1">
+                {% for t in m.tools_used %}
+                  <details class="rounded bg-slate-950/60 p-2 text-xs">
+                    <summary class="cursor-pointer font-mono text-violet-300">🔧 {{ t.name }}</summary>
+                    <pre class="mt-2 overflow-auto text-[11px] text-slate-400">{{ t.result | tojson(indent=2) }}</pre>
+                  </details>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="text-center text-sm text-slate-500">
+        <p class="mb-2">Marco is ready.</p>
+        <p class="text-xs">Try: <em>"show me the repo status"</em> · <em>"find all Python files"</em> · <em>"stage a patch that bumps the version in README.md"</em></p>
+      </div>
+    {% endif %}
+  </div>
+
+  <div id="marco-chat-status" class="hidden border-t border-slate-800 bg-slate-950/60 px-4 py-2 text-xs text-slate-400">
+    <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-400"></span>
+    <span id="marco-chat-status-text">Marco is thinking…</span>
+  </div>
+
+  <form onsubmit="return marcoChatSend(event)" class="flex gap-2 border-t border-slate-800 bg-slate-900 p-3">
+    <input id="marco-chat-input" name="message" placeholder="ask Marco (press Enter)"
+           autocomplete="off" autofocus
+           data-ai-gated="true"
+           class="flex-1 rounded bg-slate-950 px-3 py-2 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-violet-500 disabled:opacity-40" />
+    <button id="marco-chat-send" type="submit"
+            data-ai-gated="true"
+            class="rounded bg-violet-500/30 px-4 py-2 text-sm text-violet-100 hover:bg-violet-500/50 disabled:opacity-40 disabled:cursor-not-allowed">
+      Send
+    </button>
+    <button type="button" onclick="marcoClearChat()"
+            class="rounded bg-slate-800 px-3 py-2 text-xs text-slate-400 hover:bg-slate-700"
+            title="Clear conversation">
+      Clear
+    </button>
+  </form>
+
+  <p id="marco-chat-hint" class="hidden px-3 pb-3 text-xs text-slate-500">
+    AI console is disabled — set <code>MARCO_LLM_PROVIDER</code> plus the provider's env vars
+    (Azure: <code>AZURE_OPENAI_API_KEY</code>, <code>AZURE_OPENAI_ENDPOINT</code>;
+    Grok: <code>XAI_API_KEY</code>) and restart the service.
+  </p>
+</div>
+
+<script>
+  window.MARCO_CONVERSATION_ID = {{ conversation_id | tojson }};
+</script>
+{% endblock %}

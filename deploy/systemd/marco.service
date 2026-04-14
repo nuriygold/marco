@@ -1,0 +1,28 @@
+[Unit]
+Description=Marco UI server (FastAPI + HTMX)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marco
+Group=marco
+WorkingDirectory=/home/marco/marco
+EnvironmentFile=/etc/marco/marco.env
+ExecStart=/home/marco/marco/.venv/bin/python -m src.main serve --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/marco/marco /home/marco/.marco
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

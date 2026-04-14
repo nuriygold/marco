@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Sessions{% endblock %}
+{% block heading %}Sessions{% endblock %}
+{% block subheading %}Plan → execute → validate → recover, with live stream.{% endblock %}
+
+{% block content %}
+<section class="mb-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  <h2 class="mb-3 text-sm font-semibold">New plan</h2>
+  <form onsubmit="return marcoPlan(event)" class="flex gap-2">
+    <input name="goal" placeholder="e.g. refactor auth flow"
+           class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700" />
+    <button type="submit" class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Plan</button>
+    <button type="button" id="marco-ai-plan-btn"
+            onclick="marcoAIPlan(event)"
+            data-ai-gated="true"
+            title="Requires Azure OpenAI configuration"
+            class="rounded bg-violet-500/20 px-3 py-1.5 text-sm text-violet-300 hover:bg-violet-500/30 disabled:opacity-40 disabled:cursor-not-allowed">
+      ✨ AI plan
+    </button>
+  </form>
+  <p id="marco-ai-hint" class="mt-2 hidden text-xs text-slate-500">
+    AI planning is disabled — set Azure OpenAI env vars and restart the service to enable.
+  </p>
+</section>
+
+<section class="grid gap-4 md:grid-cols-5">
+  {% for label, key in [('Planned', 'planned'), ('Running', 'running'), ('Blocked', 'blocked'), ('Recoverable', 'recoverable'), ('Resumable', 'resumable')] %}
+    <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+      <h3 class="mb-2 text-xs uppercase tracking-wider text-slate-400">{{ label }}</h3>
+      {% set items = buckets[key] %}
+      {% if items %}
+        <ul class="space-y-1.5 text-xs">
+          {% for s in items|reverse %}
+            <li class="rounded bg-slate-950 p-2">
+              <div class="truncate text-slate-200">{{ s.goal or s.session_id }}</div>
+              <div class="mt-1 flex gap-1 text-[10px] text-slate-500">
+                <span class="font-mono">{{ s.session_id[:8] }}</span>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1">
+                <button class="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-500/30"
+                        onclick="marcoRunSession('{{ s.session_id }}', 'execute')">execute</button>
+                <button class="rounded bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/30"
+                        onclick="marcoRunSession('{{ s.session_id }}', 'validate')">validate</button>
+                <button class="rounded bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300 hover:bg-amber-500/30"
+                        onclick="marcoRunSession('{{ s.session_id }}', 'recover')">recover</button>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-xs text-slate-500">—</p>
+      {% endif %}
+    </div>
+  {% endfor %}
+</section>
+
+<section class="mt-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  <h2 class="mb-3 text-sm font-semibold">Live stream</h2>
+  <pre id="marco-session-stream" class="max-h-96 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-300">Pick a session action above to start streaming.</pre>
+</section>
+
+<section class="mt-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+  <h2 class="mb-3 text-sm font-semibold">All sessions ({{ sessions|length }})</h2>
+  <table class="w-full text-left text-xs">
+    <thead class="text-slate-400">
+      <tr><th class="py-1">ID</th><th>Goal</th><th>Phase</th><th>Status</th><th>Created</th></tr>
+    </thead>
+    <tbody>
+      {% for s in sessions|reverse %}
+        <tr class="border-t border-slate-800">
+          <td class="py-1 font-mono text-slate-400">{{ s.session_id[:8] }}</td>
+          <td class="truncate text-slate-200">{{ s.goal }}</td>
+          <td class="text-slate-300">{{ s.phase }}</td>
+          <td class="text-slate-300">{{ s.status }}</td>
+          <td class="text-slate-500">{{ s.created_at[:19] }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
