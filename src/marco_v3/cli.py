@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .autonomy import create_plan, execute_plan, list_sessions, recover_session, resume_session, validate_session
-from .config import ensure_profile, load_profile
+from .config import ALLOWED_SCRIPT_PREFIXES, SHELL_META, ensure_profile, load_profile
 from .extensions import default_schedules, default_subagents
 from .memory import add_entry, list_entries, recall, remember
 from .patches import apply_patch, list_patches, propose_patch, rollback_patch, show_patch
@@ -66,10 +66,6 @@ V3_COMMANDS = {
     'scaffold',
     'repl',
 }
-
-ALLOWED_SCRIPT_PREFIXES = {'python', 'python3', 'pytest', 'npm', 'pnpm', 'yarn', 'make', 'cargo', 'go', 'uv', 'poetry'}
-SHELL_META = {'|', '&', ';', '>', '<', '$', '`'}
-
 
 def register_v3_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     doctor = subparsers.add_parser('doctor', help='run Marco v3 environment checks')

@@ -6,12 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import shlex
 
-from .config import MarcoProfile
+from .config import ALLOWED_SCRIPT_PREFIXES, SHELL_META, MarcoProfile
 from .repo_intel import discover_scripts, where_edit
 from .storage import MarcoStorage
-
-ALLOWED_SCRIPT_PREFIXES = {'python', 'python3', 'pytest', 'npm', 'pnpm', 'yarn', 'make', 'cargo', 'go', 'uv', 'poetry'}
-SHELL_META = {'|', '&', ';', '>', '<', '$', '`'}
 
 
 @dataclass(frozen=True)
@@ -84,8 +81,8 @@ def validate_session(root: Path, storage: MarcoStorage, profile: MarcoProfile, s
         artifacts={
             'command': test_script,
             'returncode': process.returncode,
-            'stdout_tail': process.stdout.splitlines()[-20:],
-            'stderr_tail': process.stderr.splitlines()[-20:],
+            'stdout_tail': (process.stdout or '').splitlines()[-20:],
+            'stderr_tail': (process.stderr or '').splitlines()[-20:],
         },
         created_at=storage.now(),
     )

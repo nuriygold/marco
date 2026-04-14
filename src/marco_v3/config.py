@@ -6,6 +6,8 @@ from pathlib import Path
 
 
 DEFAULT_CONFIG_PATH = Path('.marco/config.json')
+ALLOWED_SCRIPT_PREFIXES = {'python', 'python3', 'pytest', 'npm', 'pnpm', 'yarn', 'make', 'cargo', 'go', 'uv', 'poetry'}
+SHELL_META = {'|', '&', ';', '>', '<', '$', '`'}
 
 
 @dataclass(frozen=True)
