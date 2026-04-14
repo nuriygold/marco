@@ -67,12 +67,12 @@ Or paste a JD directly to run the full pipeline.
 After determining the mode, load the necessary files before executing:
 
 ### Modes that require `_shared.md` + their mode file:
-Read `modes/_shared.md` + `modes/{mode}.md`
+Read `.claude/skills/career-ops/modes/_shared.md` + `.claude/skills/career-ops/modes/{mode}.md`
 
 Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `contacto`, `apply`, `pipeline`, `scan`, `batch`
 
 ### Standalone modes (only their mode file):
-Read `modes/{mode}.md`
+Read `.claude/skills/career-ops/modes/{mode}.md`
 
 Applies to: `tracker`, `deep`, `training`, `project`
 
@@ -82,7 +82,7 @@ For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as Agent
 ```
 Agent(
   subagent_type="general-purpose",
-  prompt="[content of modes/_shared.md]\n\n[content of modes/{mode}.md]\n\n[invocation-specific data]",
+  prompt="[content of .claude/skills/career-ops/modes/_shared.md]\n\n[content of .claude/skills/career-ops/modes/{mode}.md]\n\n[invocation-specific data]",
   description="career-ops {mode}"
 )
 ```
