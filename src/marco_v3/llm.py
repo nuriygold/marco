@@ -23,7 +23,7 @@ are set for the selected provider):
   Grok:
     XAI_API_KEY               required
     XAI_BASE_URL              default: https://api.x.ai/v1
-    XAI_MODEL                 default: grok-4-fast-reasoning
+    XAI_MODEL                 default: grok-4-fast-non-reasoning
 
   Shared:
     MARCO_LLM_TIMEOUT         default: 60 (seconds)
@@ -52,9 +52,10 @@ AZURE_DEFAULT_DEPLOYMENT = 'gpt-5.3-chat'
 AZURE_DEFAULT_API_VERSION = '2024-12-01-preview'
 GROK_DEFAULT_BASE_URL = 'https://api.x.ai/v1'
 # Rudolph has Grok 3, Grok 4 Fast Reasoning, and Grok 4 Fast Non-Reasoning.
-# grok-4-fast-reasoning is the best default for Marco — reasoning helps with
-# patch verbatim precision AND plan generation, and "fast" keeps costs sensible.
-GROK_DEFAULT_MODEL = 'grok-4-fast-reasoning'
+# grok-4-fast-non-reasoning is the default — noticeably faster and cheaper
+# than the reasoning variant, with a small tradeoff on patch precision.
+# Set XAI_MODEL=grok-4-fast-reasoning when doing patch-heavy work.
+GROK_DEFAULT_MODEL = 'grok-4-fast-non-reasoning'
 
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_MAX_RETRIES = 2
