@@ -110,13 +110,23 @@ echo "$TOKEN"
 
 Save the token somewhere you can paste into the browser later.
 
-### (Optional) Enable Azure OpenAI — AI plan + patch-suggest
+### (Optional) Enable the AI layer — Console + AI plan + patch-suggest
 
-If you want the "✨ AI plan" and "✨ AI patch suggestion" buttons to work,
-add four more lines to `/etc/marco/marco.env` and restart the service:
+Marco supports three LLM providers, selected via `MARCO_LLM_PROVIDER`:
+
+| Provider value | Use for |
+|---|---|
+| `azure-openai` | Classic Azure OpenAI (e.g. GPT-5.3 on `.cognitiveservices.azure.com`) |
+| `azure-foundry` | Azure AI Foundry's OpenAI-compatible endpoint (e.g. Grok, Llama, GPT-OSS on `.services.ai.azure.com/openai/v1`) |
+| `grok` | Direct xAI API at `api.x.ai/v1` |
+
+Pick one in `/etc/marco/marco.env`:
+
+#### Azure OpenAI
 
 ```bash
 sudo tee -a /etc/marco/marco.env >/dev/null <<'EOF'
+MARCO_LLM_PROVIDER=azure-openai
 AZURE_OPENAI_API_KEY=<your-azure-openai-key>
 AZURE_OPENAI_ENDPOINT=https://<your-resource>.cognitiveservices.azure.com
 AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
@@ -125,7 +135,7 @@ EOF
 sudo systemctl restart marco
 ```
 
-**Model recommendations for Marco:**
+**Azure model recommendations:**
 
 | Deployment | Good for Marco? | Notes |
 |---|---|---|
@@ -134,16 +144,80 @@ sudo systemctl restart marco
 | `gpt-4o-mini` | ⚠️ Weak | Cheap but unreliable for patches |
 | `gpt-3.5-turbo` | ❌ Skip | Too weak for patch verbatim work |
 
-Marco's patch-suggestion workflow requires the model to reproduce text
-byte-for-byte from your file. Weaker models paraphrase and the patch apply
-fails. If you have access to GPT-5, use it.
+#### Azure AI Foundry (Grok / Llama / GPT-OSS via Azure)
 
-**Notes on API versions:**
-- GPT-5 / o-series deployments need `2024-12-01-preview` or newer.
-- Marco auto-selects `max_completion_tokens` vs `max_tokens` based on
-  deployment name (anything matching `gpt-5`, `o1`, `o3`, `o4` uses the new
-  field). Override via `MARCO_LLM_MAX_TOKEN_FIELD=max_completion_tokens` if
-  auto-detection misses your deployment.
+If your Grok/Llama/etc. deployment lives on Azure's unified OpenAI-compatible
+endpoint (`.services.ai.azure.com/openai/v1/`), use this provider:
+
+```bash
+sudo tee -a /etc/marco/marco.env >/dev/null <<'EOF'
+MARCO_LLM_PROVIDER=azure-foundry
+AZURE_FOUNDRY_API_KEY=<your-azure-key>
+AZURE_FOUNDRY_ENDPOINT=https://<your-resource>.services.ai.azure.com/openai/v1
+AZURE_FOUNDRY_MODEL=grok-4-fast-reasoning
+EOF
+sudo systemctl restart marco
+```
+
+**Azure Foundry model recommendations for Marco:**
+
+| Deployment name | Good for Marco? | Notes |
+|---|---|---|
+| `grok-4-fast-reasoning` | ✅✅ Excellent | Reasoning helps patch precision + plan quality |
+| `grok-4` | ✅ Excellent | Flagship, slower/costlier than fast-reasoning |
+| `grok-4-fast-non-reasoning` | ✅ Good | Faster / cheaper; fine for plans, less careful on patches |
+| `grok-3` | ⚠️ OK | Legacy fallback |
+
+The deployment name you pass here must match what you named it in the Azure
+AI Foundry portal.
+
+#### Grok (direct xAI API)
+
+If you access Grok directly through `api.x.ai` (not through Azure), use:
+
+```bash
+sudo tee -a /etc/marco/marco.env >/dev/null <<'EOF'
+MARCO_LLM_PROVIDER=grok
+XAI_API_KEY=<your-xai-key>
+XAI_MODEL=grok-4-fast-reasoning
+EOF
+sudo systemctl restart marco
+```
+
+Override `XAI_BASE_URL` if you're using a non-standard xAI endpoint (default
+is `https://api.x.ai/v1`).
+
+#### Switching providers
+
+Change `MARCO_LLM_PROVIDER` and `sudo systemctl restart marco`. The AI
+status endpoint and the ✨ UI affordances automatically reflect the active
+provider. Tools and the Console work identically across both.
+
+#### Notes on API parameters
+
+- GPT-5 / o-series / reasoning models need `max_completion_tokens` instead
+  of `max_tokens`. Marco auto-selects based on deployment/model name. Override
+  via `MARCO_LLM_MAX_TOKEN_FIELD=max_completion_tokens` if the heuristic misses.
+- Retries: 429 and 5xx are retried up to `MARCO_LLM_MAX_RETRIES` times (default 2)
+  with exponential backoff. Timeout: `MARCO_LLM_TIMEOUT` seconds (default 60).
+
+### Using the Console
+
+After enabling AI, visit `/console` (top nav item). Type anything in plain
+language — Marco picks the right tool and reports back. Examples:
+
+- *"show me the repo status"* → calls `workspace_status`
+- *"find all Python files"* → calls `find_files`
+- *"where do we use the database?"* → calls `lookup_content`
+- *"remember: we use JWT for service auth"* → calls `save_memory`
+- *"plan a refactor of the auth flow"* → calls `create_plan` and stages a session
+- *"stage a patch that adds a version line to README.md"* → calls `suggest_patch`
+  and stages a patch proposal for you to review + type-confirm + apply from
+  the Patches page
+
+Every mutation (memory writes, plan creation, patch proposals) is logged to
+the audit trail. The console never applies patches or runs scripts — those
+still require explicit confirmation via the existing Patches and Scripts UIs.
 
 ## 7. Install the systemd unit
 
