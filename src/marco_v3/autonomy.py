@@ -63,7 +63,11 @@ def execute_plan(storage: MarcoStorage, session_id: str) -> SessionArtifact:
 def validate_session(root: Path, storage: MarcoStorage, profile: MarcoProfile, session_id: str) -> SessionArtifact:
     scripts = discover_scripts(root)
     test_script = next((item.command for item in scripts if 'test' in item.name.lower()), profile.default_test_command)
-    process = subprocess.run(shlex.split(test_script), cwd=root, shell=False, text=True, capture_output=True)
+    shell_meta = {'|', '&', ';', '>', '<'}
+    if any(token in test_script for token in shell_meta):
+        process = subprocess.run(test_script, cwd=root, shell=True, text=True, capture_output=True)
+    else:
+        process = subprocess.run(shlex.split(test_script), cwd=root, shell=False, text=True, capture_output=True)
     artifact = SessionArtifact(
         session_id=session_id,
         goal=storage.read_json(storage.sessions / f'{session_id}.json').get('goal', ''),

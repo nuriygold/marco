@@ -44,7 +44,7 @@ def propose_patch(storage: MarcoStorage, root: Path, *, name: str, target: str, 
     original = target_path.read_text()
     if find_text not in original:
         raise ValueError('find_text was not found in target file')
-    updated = original.replace(find_text, replace_text)
+    updated = original.replace(find_text, replace_text, 1)
     diff = ''.join(
         difflib.unified_diff(
             original.splitlines(keepends=True),
@@ -98,7 +98,7 @@ def apply_patch(storage: MarcoStorage, root: Path, profile: MarcoProfile, patch_
     checkpoint_path = checkpoint_dir / Path(proposal.target).name
     checkpoint_path.write_text(original)
 
-    updated = original.replace(proposal.find_text, proposal.replace_text)
+    updated = original.replace(proposal.find_text, proposal.replace_text, 1)
     target_path.write_text(updated)
 
     applied = PatchProposal(**{**proposal.__dict__, 'status': 'applied', 'applied_at': storage.now()})

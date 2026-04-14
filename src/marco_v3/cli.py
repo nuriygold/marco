@@ -126,6 +126,7 @@ def register_v3_parsers(subparsers: argparse._SubParsersAction[argparse.Argument
     run_script = subparsers.add_parser('run-script', help='run a discovered script or show dry-run')
     run_script.add_argument('name')
     run_script.add_argument('--execute', action='store_true')
+    run_script.add_argument('--yes', action='store_true')
 
     script_info = subparsers.add_parser('script-info', help='show metadata for one script')
     script_info.add_argument('name')
@@ -220,12 +221,16 @@ def run_v3_command(args: argparse.Namespace, cwd: Path | None = None) -> int | N
     profile = load_profile(root)
 
     if args.command == 'doctor':
+        try:
+            python_version = subprocess.run(['python3', '--version'], capture_output=True, text=True).stdout.strip()
+        except FileNotFoundError:
+            python_version = 'unavailable'
         report = {
             'ok': True,
             'cwd': str(root),
             'safety_mode': profile.safety_mode,
             'pause_before_mutation': profile.pause_before_mutation,
-            'python_version': subprocess.run(['python3', '--version'], capture_output=True, text=True).stdout.strip(),
+            'python_version': python_version,
             'git_available': subprocess.run(['git', '--version'], capture_output=True, text=True).returncode == 0,
             'profile_path': str((root / '.marco/config.json')),
         }
@@ -359,6 +364,9 @@ def run_v3_command(args: argparse.Namespace, cwd: Path | None = None) -> int | N
         if not args.execute:
             print(f"[DRY_RUN] {entry.command}")
             return 0
+        if profile.pause_before_mutation and not args.yes:
+            print('Execution requires --yes because pause_before_mutation is enabled.')
+            return 1
         proc = subprocess.run(shlex.split(entry.command), cwd=root, shell=False)
         return proc.returncode
 

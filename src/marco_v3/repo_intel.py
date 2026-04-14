@@ -10,11 +10,11 @@ IGNORE_DIRS = {'.git', '.marco', '__pycache__', '.venv', 'node_modules', 'target
 ROUTE_FILE_PATTERNS = ('*route*', '*router*', '*routes*', '*urls.py', '*app.py')
 TEXT_EXTENSIONS = {'.py', '.ts', '.tsx', '.js', '.jsx', '.go', '.rs', '.java', '.kt', '.yml', '.yaml', '.json', '.toml', '.env', '.md'}
 ENV_PATTERNS = [
-    re.compile(r"os\.environ\[['\"]([A-Z0-9_]+)['\"]\]"),
-    re.compile(r"os\.getenv\(['\"]([A-Z0-9_]+)['\"]"),
-    re.compile(r"process\.env\.([A-Z0-9_]+)"),
-    re.compile(r"import\.meta\.env\.([A-Z0-9_]+)"),
-    re.compile(r"\$\{([A-Z][A-Z0-9_]+)\}"),
+    re.compile(r"os\.environ\[['\"]([A-Za-z0-9_]+)['\"]\]"),
+    re.compile(r"os\.getenv\(['\"]([A-Za-z0-9_]+)['\"]"),
+    re.compile(r"process\.env\.([A-Za-z0-9_]+)"),
+    re.compile(r"import\.meta\.env\.([A-Za-z0-9_]+)"),
+    re.compile(r"\$\{([A-Za-z][A-Za-z0-9_]+)\}"),
 ]
 
 
@@ -217,7 +217,13 @@ def discover_scripts(root: Path) -> list[ScriptEntry]:
                 break
             if in_section and '=' in stripped:
                 name, target = stripped.split('=', 1)
-                scripts.append(ScriptEntry(name=name.strip(), command=f'python -m {target.strip().strip("\"\'")}', source='pyproject.toml'))
+                target_ref = target.strip().strip("\"'")
+                if ':' in target_ref:
+                    module_name, callable_name = target_ref.split(':', 1)
+                    command = f'python -c "from {module_name} import {callable_name} as _entry; _entry()"'
+                else:
+                    command = f'python -m {target_ref}'
+                scripts.append(ScriptEntry(name=name.strip(), command=command, source='pyproject.toml'))
 
     unique: dict[tuple[str, str], ScriptEntry] = {}
     for item in scripts:
