@@ -264,8 +264,9 @@ def chat_completion(
     if tool_choice is not None:
         payload['tool_choice'] = tool_choice
 
-    # Grok needs the model field in body; Azure has it in the URL.
-    if cfg.provider == 'grok':
+    # Grok and Azure Foundry need the model field in body; classic Azure
+    # OpenAI has the deployment in the URL path instead.
+    if cfg.provider in ('grok', 'azure-foundry'):
         payload['model'] = cfg.model
 
     headers = {

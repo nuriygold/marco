@@ -223,6 +223,43 @@ class ChatCompletionTests(unittest.TestCase):
         self.assertEqual(body['model'], 'grok-4-fast-reasoning')
         self.assertIn('max_tokens', body)
 
+    def test_azure_foundry_sends_model_in_body(self) -> None:
+        # Regression: Azure Foundry's OpenAI-compat API requires the model in
+        # the request body just like Grok. If the field is missing, Azure
+        # returns {"error": {"message": "Missed model deployment"}}.
+        captured: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            return httpx.Response(
+                200,
+                json={'choices': [{'message': {'content': '{}'}}]},
+                request=request,
+            )
+
+        foundry_cfg = llm.ProviderConfig(
+            provider='azure-foundry',
+            api_key='foundry-key',
+            url='https://blessed.services.ai.azure.com/openai/v1/chat/completions',
+            model='grok-4-fast-reasoning',
+            auth_header='Authorization',
+            auth_prefix='Bearer ',
+            tokens_field='max_tokens',
+            timeout=5.0,
+            max_retries=0,
+            display={'provider': 'azure-foundry'},
+        )
+        transport = httpx.MockTransport(handler)
+        with httpx.Client(transport=transport) as client:
+            llm.chat_completion(
+                messages=[{'role': 'user', 'content': 'x'}],
+                config=foundry_cfg,
+                client=client,
+            )
+        body = json.loads(captured[0].read().decode())
+        self.assertEqual(body['model'], 'grok-4-fast-reasoning')
+        self.assertEqual(captured[0].headers['authorization'], 'Bearer foundry-key')
+
     def test_retry_on_503_then_success(self) -> None:
         call_count = {'n': 0}
 
