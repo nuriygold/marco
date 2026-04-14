@@ -158,6 +158,9 @@ fi
 # --- 7. systemd ------------------------------------------------------------
 
 log "Installing systemd unit..."
+# Pre-create the user state dir so systemd's ReadWritePaths hardening
+# doesn't refuse to start the service when .marco doesn't exist yet.
+sudo -u marco mkdir -p "${MARCO_HOME}/.marco"
 cp "${MARCO_REPO}/deploy/systemd/marco.service" "${SYSTEMD_UNIT}"
 systemctl daemon-reload
 systemctl enable --now marco
