@@ -67,6 +67,9 @@ V3_COMMANDS = {
     'repl',
 }
 
+ALLOWED_SCRIPT_PREFIXES = {'python', 'python3', 'pytest', 'npm', 'pnpm', 'yarn', 'make', 'cargo', 'go', 'uv', 'poetry'}
+SHELL_META = {'|', '&', ';', '>', '<', '$', '`'}
+
 
 def register_v3_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     doctor = subparsers.add_parser('doctor', help='run Marco v3 environment checks')
@@ -209,6 +212,18 @@ def _print(payload: Any, as_json: bool = False) -> None:
         print(payload)
         return
     print(json.dumps(payload, indent=2))
+
+
+def _validate_command_for_execution(command: str, safety_mode: str) -> tuple[bool, str]:
+    if any(token in command for token in SHELL_META):
+        if safety_mode != 'danger-full-access':
+            return False, 'command contains shell metacharacters and requires danger-full-access'
+    parts = shlex.split(command)
+    if not parts:
+        return False, 'empty command'
+    if safety_mode != 'danger-full-access' and parts[0] not in ALLOWED_SCRIPT_PREFIXES:
+        return False, f'command prefix {parts[0]!r} is not allowed in {safety_mode}'
+    return True, ''
 
 
 def run_v3_command(args: argparse.Namespace, cwd: Path | None = None) -> int | None:
@@ -366,6 +381,10 @@ def run_v3_command(args: argparse.Namespace, cwd: Path | None = None) -> int | N
             return 0
         if profile.pause_before_mutation and not args.yes:
             print('Execution requires --yes because pause_before_mutation is enabled.')
+            return 1
+        ok, reason = _validate_command_for_execution(entry.command, profile.safety_mode)
+        if not ok:
+            print(f'Blocked script execution: {reason}')
             return 1
         proc = subprocess.run(shlex.split(entry.command), cwd=root, shell=False)
         return proc.returncode

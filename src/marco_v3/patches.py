@@ -44,6 +44,8 @@ def propose_patch(storage: MarcoStorage, root: Path, *, name: str, target: str, 
     original = target_path.read_text()
     if find_text not in original:
         raise ValueError('find_text was not found in target file')
+    if original.count(find_text) != 1:
+        raise ValueError('find_text must match exactly once in target file for safe patching')
     updated = original.replace(find_text, replace_text, 1)
     diff = ''.join(
         difflib.unified_diff(
@@ -92,6 +94,8 @@ def apply_patch(storage: MarcoStorage, root: Path, profile: MarcoProfile, patch_
     original = target_path.read_text()
     if proposal.find_text not in original:
         raise ValueError('Cannot apply patch; target text is no longer present')
+    if original.count(proposal.find_text) != 1:
+        raise ValueError('Cannot apply patch safely; target match is not unique')
 
     checkpoint_dir = storage.checkpoints / patch_id
     checkpoint_dir.mkdir(parents=True, exist_ok=True)

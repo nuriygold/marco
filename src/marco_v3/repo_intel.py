@@ -14,7 +14,7 @@ ENV_PATTERNS = [
     re.compile(r"os\.getenv\(['\"]([A-Za-z0-9_]+)['\"]"),
     re.compile(r"process\.env\.([A-Za-z0-9_]+)"),
     re.compile(r"import\.meta\.env\.([A-Za-z0-9_]+)"),
-    re.compile(r"\$\{([A-Za-z][A-Za-z0-9_]+)\}"),
+    re.compile(r"\$\{([A-Za-z][A-Za-z0-9_]*)\}"),
 ]
 
 
@@ -220,6 +220,9 @@ def discover_scripts(root: Path) -> list[ScriptEntry]:
                 target_ref = target.strip().strip("\"'")
                 if ':' in target_ref:
                     module_name, callable_name = target_ref.split(':', 1)
+                    safe_ref = re.compile(r'^[A-Za-z_][A-Za-z0-9_\\.]*$')
+                    if not safe_ref.match(module_name) or not safe_ref.match(callable_name):
+                        continue
                     command = f'python -c "from {module_name} import {callable_name} as _entry; _entry()"'
                 else:
                     command = f'python -m {target_ref}'

@@ -56,7 +56,7 @@ class MarcoV3MVPTests(unittest.TestCase):
     def test_script_and_env_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / 'package.json').write_text(json.dumps({'scripts': {'test': 'pytest -q', 'build': 'python -m pip --version'}}))
+            (root / 'package.json').write_text(json.dumps({'scripts': {'test': 'echo test', 'build': 'python -m pip --version'}}))
             (root / 'app.py').write_text('import os\nos.getenv("API_KEY")\n')
             scripts = discover_scripts(root)
             env_vars = discover_env_vars(root)

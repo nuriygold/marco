@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,8 @@ class ScaffoldResult:
 
 
 def _to_pascal_case(name: str) -> str:
+    if not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*$', name):
+        raise ValueError(f'invalid scaffold name: {name}')
     return ''.join(part.capitalize() for part in name.replace('-', '_').split('_') if part)
 
 

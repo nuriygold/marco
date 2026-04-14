@@ -10,6 +10,9 @@ from .config import MarcoProfile
 from .repo_intel import discover_scripts, where_edit
 from .storage import MarcoStorage
 
+ALLOWED_SCRIPT_PREFIXES = {'python', 'python3', 'pytest', 'npm', 'pnpm', 'yarn', 'make', 'cargo', 'go', 'uv', 'poetry'}
+SHELL_META = {'|', '&', ';', '>', '<', '$', '`'}
+
 
 @dataclass(frozen=True)
 class SessionArtifact:
@@ -63,11 +66,16 @@ def execute_plan(storage: MarcoStorage, session_id: str) -> SessionArtifact:
 def validate_session(root: Path, storage: MarcoStorage, profile: MarcoProfile, session_id: str) -> SessionArtifact:
     scripts = discover_scripts(root)
     test_script = next((item.command for item in scripts if 'test' in item.name.lower()), profile.default_test_command)
-    shell_meta = {'|', '&', ';', '>', '<'}
-    if any(token in test_script for token in shell_meta):
-        process = subprocess.run(test_script, cwd=root, shell=True, text=True, capture_output=True)
+    if any(token in test_script for token in SHELL_META) and profile.safety_mode != 'danger-full-access':
+        process = subprocess.CompletedProcess(args=test_script, returncode=1, stdout='', stderr='blocked unsafe shell metacharacters')
     else:
-        process = subprocess.run(shlex.split(test_script), cwd=root, shell=False, text=True, capture_output=True)
+        parsed = shlex.split(test_script)
+        if not parsed:
+            process = subprocess.CompletedProcess(args=test_script, returncode=1, stdout='', stderr='empty validation command')
+        elif profile.safety_mode != 'danger-full-access' and parsed[0] not in ALLOWED_SCRIPT_PREFIXES:
+            process = subprocess.CompletedProcess(args=test_script, returncode=1, stdout='', stderr='blocked command prefix for safety mode')
+        else:
+            process = subprocess.run(parsed, cwd=root, shell=False, text=True, capture_output=True)
     artifact = SessionArtifact(
         session_id=session_id,
         goal=storage.read_json(storage.sessions / f'{session_id}.json').get('goal', ''),
