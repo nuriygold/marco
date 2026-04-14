@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shlex
 import subprocess
 import threading
@@ -77,6 +78,32 @@ STATIC_DIR = Path(__file__).parent / 'static'
 
 # Server always runs workspace-write. No HTTP surface for danger-full-access.
 SERVER_PROFILE = MarcoProfile(safety_mode='workspace-write', pause_before_mutation=False)
+
+# ---------- Light-task classifier -------------------------------------------
+
+_HEAVY_RE = re.compile(
+    r'\b(patch|fix|change|update|modify|refactor|plan|implement|add|remove|delete|'
+    r'debug|broken|error|fail|why|how do|create|build|deploy|migrate|generate|'
+    r'suggest|stage|propose|review|analyze|analyse|diagnose|improve|rewrite|rename)\b',
+    re.IGNORECASE,
+)
+_LIGHT_RE = re.compile(
+    r'\b(show|list|what|who|where|status|check|find|search|recall|get|view|'
+    r'display|tell me|describe|print|lookup|look up)\b',
+    re.IGNORECASE,
+)
+
+
+def _classify_task(message: str) -> str:
+    """Heuristic: returns 'light' (pure lookup) or 'heavy' (reasoning needed).
+
+    Heavy signals take priority so ambiguous messages stay in reasoning mode.
+    """
+    if _HEAVY_RE.search(message):
+        return 'heavy'
+    if _LIGHT_RE.search(message):
+        return 'light'
+    return 'heavy'  # safe default — never silently downgrade
 
 
 def _require_active_workspace(registry_path: Path = REGISTRY_PATH) -> Workspace:
@@ -878,13 +905,25 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
         if not message:
             raise HTTPException(status_code=400, detail='message is required')
         conversation_id = (payload.get('conversation_id') or 'default').strip() or 'default'
+        lite = bool(payload.get('lite'))
+        force_heavy = bool(payload.get('force_heavy'))
 
         try:
             cfg = llm.load_config()
         except llm.LLMNotConfigured as exc:
             raise HTTPException(status_code=503, detail=str(exc))
 
+        # Choose model: lite flag → non-reasoning variant; otherwise full reasoning.
+        active_cfg = llm.lite_config(cfg) if lite else cfg
+
         async def generate() -> AsyncIterator[str]:
+            # Light-task gate: emit 'lite' event and let the client decide
+            # whether to re-submit with lite=true or force_heavy=true.
+            # Only runs when neither flag is set (first, unqualified request).
+            if not lite and not force_heavy and _classify_task(message) == 'light':
+                yield format_sse('lite', {})
+                return
+
             queue: asyncio.Queue[str | None] = asyncio.Queue()
             loop = asyncio.get_event_loop()
 
@@ -914,7 +953,7 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
                             messages=api_messages,
                             tools=chat_tools.TOOL_SCHEMAS,
                             tool_choice='auto',
-                            config=cfg,
+                            config=active_cfg,
                             max_tokens=1500,
                         )
                         choice = (response.get('choices') or [{}])[0]

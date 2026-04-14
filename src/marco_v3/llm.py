@@ -51,11 +51,11 @@ logger = logging.getLogger(__name__)
 AZURE_DEFAULT_DEPLOYMENT = 'gpt-5.3-chat'
 AZURE_DEFAULT_API_VERSION = '2024-12-01-preview'
 GROK_DEFAULT_BASE_URL = 'https://api.x.ai/v1'
-# Rudolph has Grok 4.1 Fast Reasoning and Grok 4.1 Fast Non-Reasoning.
-# grok-4-1-fast-non-reasoning is the default — noticeably faster and cheaper
-# than the reasoning variant, with a small tradeoff on patch precision.
-# Set XAI_MODEL=grok-4-1-fast-reasoning when doing patch-heavy work.
-GROK_DEFAULT_MODEL = 'grok-4-1-fast-non-reasoning'
+# Reasoning is the default — Marco is designed to be precise and heavy-duty.
+# For simple lookups the server offers a "fast mode" banner that switches to
+# the non-reasoning variant automatically when the user approves.
+# Override via XAI_MODEL env var if needed.
+GROK_DEFAULT_MODEL = 'grok-4-1-fast-reasoning'
 
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_MAX_RETRIES = 2
@@ -107,6 +107,21 @@ def _pick_tokens_field(model_or_deployment: str) -> str:
     if any(tag in low for tag in ('gpt-5', 'gpt5', 'o1', 'o3', 'o4', 'reasoning')):
         return 'max_completion_tokens'
     return 'max_tokens'
+
+
+def lite_config(cfg: ProviderConfig) -> ProviderConfig:
+    """Return a config variant that uses the non-reasoning model.
+
+    Swaps ``-reasoning`` → ``-non-reasoning`` in the model name.
+    If the model is already non-reasoning (or has no reasoning tag), returns
+    the config unchanged.
+    """
+    from dataclasses import replace
+
+    if 'non-reasoning' in cfg.model or 'reasoning' not in cfg.model:
+        return cfg
+    lite_model = cfg.model.replace('-reasoning', '-non-reasoning')
+    return replace(cfg, model=lite_model, tokens_field=_pick_tokens_field(lite_model))
 
 
 def _load_azure() -> ProviderConfig:
