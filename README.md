@@ -33,6 +33,19 @@ Core capabilities include:
 - bootstrap/session reporting
 - parity auditing against a local archived tree
 - remote/ssh/teleport/direct/deep-link mode simulation
+- Marco v3 operator workflows: repo intelligence, patch safety, memory notebook, scaffolding, autonomy sessions
+
+## Marco v3 MVP command surface
+
+Marco now includes a practical v3 operator surface:
+
+- foundation: `doctor`, `status`, `summary`, `manifest`, `inspect`
+- autonomy: `plan`, `execute`, `validate`, `recover`, `sessions`, `resume`
+- toolbox: `find`, `lookup`, `routes`, `env`, `scripts`, `run-script`, `script-info`, `tree`
+- memory: `note`, `notes`, `remember`, `recall`, `decision`, `decisions`, `convention`, `conventions`
+- patching: `propose-patch`, `show-patch`, `apply-patch`, `rollback-patch`, `list-patches`
+- scaffold: `scaffold page|component|route|service`
+- repl: `repl` for slash-command style interaction
 
 ## API philosophy
 
