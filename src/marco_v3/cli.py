@@ -67,7 +67,7 @@ V3_COMMANDS = {
     'repl',
 }
 
-def register_v3_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def register_v3_parsers(subparsers) -> None:
     doctor = subparsers.add_parser('doctor', help='run Marco v3 environment checks')
     doctor.add_argument('--json', action='store_true')
 

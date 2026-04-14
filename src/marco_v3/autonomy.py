@@ -25,6 +25,10 @@ def _new_session_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _make_blocked_process(command: str, reason: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(args=command, returncode=1, stdout='', stderr=reason)
+
+
 def create_plan(root: Path, storage: MarcoStorage, goal: str) -> SessionArtifact:
     edits = where_edit(root, goal, limit=5)
     steps = [
@@ -64,13 +68,13 @@ def validate_session(root: Path, storage: MarcoStorage, profile: MarcoProfile, s
     scripts = discover_scripts(root)
     test_script = next((item.command for item in scripts if 'test' in item.name.lower()), profile.default_test_command)
     if any(token in test_script for token in SHELL_META) and profile.safety_mode != 'danger-full-access':
-        process = subprocess.CompletedProcess(args=test_script, returncode=1, stdout='', stderr='blocked unsafe shell metacharacters')
+        process = _make_blocked_process(test_script, 'blocked unsafe shell metacharacters')
     else:
         parsed = shlex.split(test_script)
         if not parsed:
-            process = subprocess.CompletedProcess(args=test_script, returncode=1, stdout='', stderr='empty validation command')
+            process = _make_blocked_process(test_script, 'empty validation command')
         elif profile.safety_mode != 'danger-full-access' and parsed[0] not in ALLOWED_SCRIPT_PREFIXES:
-            process = subprocess.CompletedProcess(args=test_script, returncode=1, stdout='', stderr='blocked command prefix for safety mode')
+            process = _make_blocked_process(test_script, 'blocked command prefix for safety mode')
         else:
             process = subprocess.run(parsed, cwd=root, shell=False, text=True, capture_output=True)
     artifact = SessionArtifact(

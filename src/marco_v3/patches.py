@@ -34,6 +34,13 @@ def _load(storage: MarcoStorage, patch_id: str) -> PatchProposal:
     return PatchProposal(**data)
 
 
+def _validate_single_match(content: str, find_text: str, message: str) -> None:
+    if find_text not in content:
+        raise ValueError(message)
+    if content.count(find_text) != 1:
+        raise ValueError('find_text must match exactly once in target file for safe patching')
+
+
 def propose_patch(storage: MarcoStorage, root: Path, *, name: str, target: str, find_text: str, replace_text: str) -> PatchProposal:
     created_at = storage.now()
     patch_id = _patch_id(name, target, created_at)
@@ -42,10 +49,7 @@ def propose_patch(storage: MarcoStorage, root: Path, *, name: str, target: str, 
         raise FileNotFoundError(f'Target file does not exist: {target}')
 
     original = target_path.read_text()
-    if find_text not in original:
-        raise ValueError('find_text was not found in target file')
-    if original.count(find_text) != 1:
-        raise ValueError('find_text must match exactly once in target file for safe patching')
+    _validate_single_match(original, find_text, 'find_text was not found in target file')
     updated = original.replace(find_text, replace_text, 1)
     diff = ''.join(
         difflib.unified_diff(
@@ -92,10 +96,7 @@ def apply_patch(storage: MarcoStorage, root: Path, profile: MarcoProfile, patch_
 
     target_path = root / proposal.target
     original = target_path.read_text()
-    if proposal.find_text not in original:
-        raise ValueError('Cannot apply patch; target text is no longer present')
-    if original.count(proposal.find_text) != 1:
-        raise ValueError('Cannot apply patch safely; target match is not unique')
+    _validate_single_match(original, proposal.find_text, 'Cannot apply patch; target text is no longer present')
 
     checkpoint_dir = storage.checkpoints / patch_id
     checkpoint_dir.mkdir(parents=True, exist_ok=True)

@@ -16,6 +16,8 @@ class ScaffoldResult:
 def _to_pascal_case(name: str) -> str:
     if not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*$', name):
         raise ValueError(f'invalid scaffold name: {name}')
+    if name[0] in {'-', '_'} or name[-1] in {'-', '_'} or '__' in name or '--' in name or '_-' in name or '-_' in name:
+        raise ValueError(f'invalid scaffold separator usage: {name}')
     return ''.join(part.capitalize() for part in name.replace('-', '_').split('_') if part)
 
 
