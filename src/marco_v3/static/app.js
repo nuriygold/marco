@@ -83,6 +83,112 @@ async function marcoAIPatchSuggest(event) {
   return false;
 }
 
+// ---------- Console (chat orchestrator) ----------
+
+function marcoChatRenderMessage(msg) {
+  const wrap = document.createElement('div');
+  wrap.className = 'flex ' + (msg.role === 'user' ? 'justify-end' : 'justify-start');
+
+  const bubble = document.createElement('div');
+  bubble.className = 'max-w-3xl rounded-lg px-3 py-2 text-sm ' + (
+    msg.role === 'user' ? 'bg-emerald-500/15 text-emerald-100' :
+    msg.role === 'assistant' ? 'bg-slate-800 text-slate-100' :
+    'bg-amber-500/10 text-amber-200 text-xs'
+  );
+
+  const label = document.createElement('div');
+  label.className = 'mb-1 text-[10px] uppercase tracking-wider opacity-60';
+  label.textContent = msg.role;
+  bubble.appendChild(label);
+
+  const body = document.createElement('div');
+  body.className = 'whitespace-pre-wrap';
+  body.textContent = msg.content || '';
+  bubble.appendChild(body);
+
+  if (msg.tools_used && msg.tools_used.length) {
+    const toolsWrap = document.createElement('div');
+    toolsWrap.className = 'mt-2 space-y-1';
+    msg.tools_used.forEach(t => {
+      const d = document.createElement('details');
+      d.className = 'rounded bg-slate-950/60 p-2 text-xs';
+      const s = document.createElement('summary');
+      s.className = 'cursor-pointer font-mono text-violet-300';
+      s.textContent = '🔧 ' + t.name;
+      d.appendChild(s);
+      const pre = document.createElement('pre');
+      pre.className = 'mt-2 overflow-auto text-[11px] text-slate-400';
+      pre.textContent = JSON.stringify(t.result, null, 2);
+      d.appendChild(pre);
+      toolsWrap.appendChild(d);
+    });
+    bubble.appendChild(toolsWrap);
+  }
+
+  wrap.appendChild(bubble);
+  return wrap;
+}
+
+async function marcoChatSend(event) {
+  if (event) event.preventDefault();
+  const input = document.getElementById('marco-chat-input');
+  const sendBtn = document.getElementById('marco-chat-send');
+  const transcript = document.getElementById('marco-chat-transcript');
+  const statusEl = document.getElementById('marco-chat-status');
+
+  const message = input.value.trim();
+  if (!message) return false;
+
+  // Echo user message immediately.
+  transcript.appendChild(marcoChatRenderMessage({ role: 'user', content: message }));
+  transcript.scrollTop = transcript.scrollHeight;
+
+  input.value = '';
+  input.disabled = true;
+  sendBtn.disabled = true;
+  statusEl.classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        conversation_id: window.MARCO_CONVERSATION_ID || 'default',
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || res.statusText);
+    }
+    const data = await res.json();
+    transcript.appendChild(marcoChatRenderMessage(data.assistant));
+    transcript.scrollTop = transcript.scrollHeight;
+  } catch (e) {
+    transcript.appendChild(marcoChatRenderMessage({
+      role: 'system',
+      content: 'Error: ' + e.message,
+    }));
+  } finally {
+    input.disabled = false;
+    sendBtn.disabled = false;
+    statusEl.classList.add('hidden');
+    input.focus();
+  }
+  return false;
+}
+
+async function marcoClearChat() {
+  if (!confirm('Clear this conversation?')) return;
+  const id = window.MARCO_CONVERSATION_ID || 'default';
+  try {
+    await fetch('/api/ai/conversations/' + encodeURIComponent(id), { method: 'DELETE' });
+    window.location.reload();
+  } catch (e) {
+    alert('Clear failed: ' + e.message);
+  }
+}
+
 async function marcoGet(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(res.statusText);
