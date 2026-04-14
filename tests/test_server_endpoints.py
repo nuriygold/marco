@@ -83,6 +83,7 @@ class ReadOnlyEndpointsTests(ServerTestBase):
 
 class MemoryEndpointsTests(ServerTestBase):
     def test_add_and_list_note(self) -> None:
+        # Legacy path (backwards compat shim).
         res = self.client.post(
             '/api/note',
             json={'key': 'k1', 'topic': 't1', 'text': 'some detail'},
@@ -93,6 +94,19 @@ class MemoryEndpointsTests(ServerTestBase):
         self.assertEqual(res.status_code, 200)
         entries = res.json()['entries']
         self.assertTrue(any(e['key'] == 'k1' for e in entries))
+
+    def test_add_and_list_note_new_path(self) -> None:
+        # New unambiguous path at /api/memory/{kind}.
+        res = self.client.post(
+            '/api/memory/note',
+            json={'key': 'mem1', 'topic': 't1', 'text': 'via new path'},
+            headers=self.headers,
+        )
+        self.assertEqual(res.status_code, 200)
+        res = self.client.get('/api/memory/notes', headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        entries = res.json()['entries']
+        self.assertTrue(any(e['key'] == 'mem1' for e in entries))
 
     def test_recall_finds_entry(self) -> None:
         self.client.post(
