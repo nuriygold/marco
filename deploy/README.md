@@ -110,6 +110,41 @@ echo "$TOKEN"
 
 Save the token somewhere you can paste into the browser later.
 
+### (Optional) Enable Azure OpenAI — AI plan + patch-suggest
+
+If you want the "✨ AI plan" and "✨ AI patch suggestion" buttons to work,
+add four more lines to `/etc/marco/marco.env` and restart the service:
+
+```bash
+sudo tee -a /etc/marco/marco.env >/dev/null <<'EOF'
+AZURE_OPENAI_API_KEY=<your-azure-openai-key>
+AZURE_OPENAI_ENDPOINT=https://<your-resource>.cognitiveservices.azure.com
+AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+EOF
+sudo systemctl restart marco
+```
+
+**Model recommendations for Marco:**
+
+| Deployment | Good for Marco? | Notes |
+|---|---|---|
+| `gpt-5.3-chat` / `gpt-5-chat` | ✅ Excellent | Best verbatim reproduction for patch find/replace |
+| `gpt-4o` | ✅ Good | Solid all-rounder |
+| `gpt-4o-mini` | ⚠️ Weak | Cheap but unreliable for patches |
+| `gpt-3.5-turbo` | ❌ Skip | Too weak for patch verbatim work |
+
+Marco's patch-suggestion workflow requires the model to reproduce text
+byte-for-byte from your file. Weaker models paraphrase and the patch apply
+fails. If you have access to GPT-5, use it.
+
+**Notes on API versions:**
+- GPT-5 / o-series deployments need `2024-12-01-preview` or newer.
+- Marco auto-selects `max_completion_tokens` vs `max_tokens` based on
+  deployment name (anything matching `gpt-5`, `o1`, `o3`, `o4` uses the new
+  field). Override via `MARCO_LLM_MAX_TOKEN_FIELD=max_completion_tokens` if
+  auto-detection misses your deployment.
+
 ## 7. Install the systemd unit
 
 ```bash
