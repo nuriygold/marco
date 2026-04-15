@@ -44,7 +44,6 @@ async function marcoInitAIGates() {
 document.addEventListener('DOMContentLoaded', marcoInitAIGates);
 document.addEventListener('DOMContentLoaded', marcoSidebarInit);
 document.addEventListener('DOMContentLoaded', marcoScrollHelpersInit);
-document.addEventListener('DOMContentLoaded', marcoLoadWorkspaceCandidates);
 
 // ---------- Sidebar collapse (desktop icon-rail) ----------
 
@@ -130,48 +129,113 @@ function marcoScrollHelpersInit() {
   new MutationObserver(update).observe(transcript, { childList: true, subtree: true });
 }
 
-// ---------- Workspace: quick-add candidates ----------
+// ---------- Workspace: add modal ----------
 
-async function marcoLoadWorkspaceCandidates() {
-  const hosts = document.querySelectorAll('.marco-ws-candidates');
-  if (!hosts.length) return;
-  let html = '';
-  try {
-    const res = await fetch('/api/workspaces/candidates');
-    if (!res.ok) { hosts.forEach(h => { h.innerHTML = ''; }); return; }
-    const data = await res.json();
-    if (!data.candidates || !data.candidates.length) {
-      html = '<p class="text-[11px] text-slate-500">No detected repos. Use Advanced below.</p>';
-    } else {
-      html = data.candidates.map(c => `
-        <button type="button"
-                data-name="${escapeHtml(c.name)}" data-path="${escapeHtml(c.path)}"
-                onclick="marcoQuickAddWorkspace(this)"
-                class="flex w-full items-center justify-between gap-2 rounded bg-slate-900 px-2 py-1 text-left text-xs text-slate-200 ring-1 ring-slate-700 hover:bg-slate-800 hover:text-white">
-          <span class="truncate font-mono text-emerald-300">${escapeHtml(c.name)}</span>
-          <span class="truncate text-[10px] text-slate-500" title="${escapeHtml(c.path)}">${escapeHtml(c.path)}</span>
-        </button>
-      `).join('');
-    }
-    hosts.forEach(h => { h.innerHTML = html; });
-  } catch (e) {
-    hosts.forEach(h => { h.innerHTML = ''; });
+function marcoWorkspaceModalOpen() {
+  const modal = document.getElementById('marco-workspace-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.getElementById('ws-name')?.focus();
+  document.addEventListener('keydown', _marcoWsModalKey);
+}
+
+function marcoWorkspaceModalClose() {
+  const modal = document.getElementById('marco-workspace-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  document.removeEventListener('keydown', _marcoWsModalKey);
+  // Reset form state.
+  document.getElementById('marco-ws-form')?.reset();
+  marcoWsModeChange('local');
+  const errEl = document.getElementById('ws-error');
+  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  const statusEl = document.getElementById('ws-path-status');
+  if (statusEl) { statusEl.textContent = ''; }
+}
+
+function _marcoWsModalKey(ev) {
+  if (ev.key === 'Escape') marcoWorkspaceModalClose();
+}
+
+function marcoWsModeChange(mode) {
+  const localFields = document.getElementById('ws-local-fields');
+  const remoteFields = document.getElementById('ws-remote-fields');
+  if (!localFields || !remoteFields) return;
+  if (mode === 'local') {
+    localFields.classList.remove('hidden');
+    remoteFields.classList.add('hidden');
+  } else {
+    localFields.classList.add('hidden');
+    remoteFields.classList.remove('hidden');
   }
 }
 
-async function marcoQuickAddWorkspace(btn) {
-  const name = btn.dataset.name;
-  const path = btn.dataset.path;
-  btn.disabled = true;
-  btn.classList.add('opacity-50');
+async function marcoValidatePath() {
+  const pathInput = document.getElementById('ws-path');
+  const statusEl = document.getElementById('ws-path-status');
+  const path = (pathInput?.value || '').trim();
+  if (!path) { statusEl.textContent = '⚠ Enter a path first.'; statusEl.className = 'mt-1 text-xs text-amber-400'; return; }
+  statusEl.textContent = 'Checking…'; statusEl.className = 'mt-1 text-xs text-slate-400';
   try {
-    await marcoPost('/api/workspaces', { name, path });
+    const data = await marcoPost('/api/validate-path', { path });
+    if (data.exists) {
+      const git = data.is_git ? ' · git repo detected' : '';
+      statusEl.textContent = `✓ Found${git}`;
+      statusEl.className = 'mt-1 text-xs text-emerald-400';
+      // Auto-fill name from the last path segment if empty.
+      const nameInput = document.getElementById('ws-name');
+      if (nameInput && !nameInput.value) {
+        nameInput.value = data.resolved.split('/').filter(Boolean).pop() || '';
+      }
+    } else {
+      statusEl.textContent = '✗ Path does not exist or is not a directory.';
+      statusEl.className = 'mt-1 text-xs text-red-400';
+    }
+  } catch (e) {
+    statusEl.textContent = '✗ ' + e.message;
+    statusEl.className = 'mt-1 text-xs text-red-400';
+  }
+}
+
+async function marcoWorkspaceSubmit(event) {
+  if (event) event.preventDefault();
+  const errEl = document.getElementById('ws-error');
+  const submitBtn = document.getElementById('ws-submit-btn');
+  const hideErr = () => { errEl?.classList.add('hidden'); };
+  const showErr = (msg) => {
+    if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+  };
+
+  const mode = document.querySelector('input[name="ws-mode"]:checked')?.value || 'local';
+  const name = (document.getElementById('ws-name')?.value || '').trim();
+  if (!name) { showErr('Workspace name is required.'); return false; }
+
+  hideErr();
+  submitBtn.disabled = true;
+  submitBtn.textContent = mode === 'remote' ? 'Cloning…' : 'Registering…';
+
+  try {
+    if (mode === 'local') {
+      const path = (document.getElementById('ws-path')?.value || '').trim();
+      if (!path) { showErr('Path is required.'); return false; }
+      await marcoPost('/api/workspaces', { name, path });
+    } else {
+      const url = (document.getElementById('ws-url')?.value || '').trim();
+      const branch = (document.getElementById('ws-branch')?.value || '').trim();
+      const shallow = document.getElementById('ws-shallow')?.checked !== false;
+      if (!url) { showErr('Repository URL is required.'); return false; }
+      await marcoPost('/api/workspaces/clone', { name, url, branch, shallow: String(shallow) });
+    }
+    marcoWorkspaceModalClose();
     window.location.reload();
   } catch (e) {
-    alert('Failed to register: ' + e.message);
-    btn.disabled = false;
-    btn.classList.remove('opacity-50');
+    showErr(e.message || 'Failed to add workspace.');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Add workspace';
   }
+  return false;
 }
 
 async function marcoAIPlan(event) {

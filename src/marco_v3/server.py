@@ -379,6 +379,78 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
         audit_record('workspace.remove', workspace=name, params={})
         return {'removed': name}
 
+    @app.post('/api/validate-path')
+    async def api_validate_path(payload: dict[str, str]) -> dict[str, Any]:
+        """Check whether a local path exists and is a directory."""
+        raw = payload.get('path') or ''
+        if not raw:
+            raise HTTPException(status_code=400, detail='path is required')
+        resolved = Path(raw).expanduser().resolve()
+        return {
+            'exists': resolved.exists() and resolved.is_dir(),
+            'resolved': str(resolved),
+            'is_git': (resolved / '.git').exists(),
+        }
+
+    @app.post('/api/workspaces/clone')
+    async def api_clone_workspace(payload: dict[str, str]) -> dict[str, Any]:
+        """Shallow-clone a remote git URL then register the result as a workspace."""
+        url = (payload.get('url') or '').strip()
+        name = (payload.get('name') or '').strip()
+        branch = (payload.get('branch') or '').strip()
+        shallow = str(payload.get('shallow', 'true')).lower() != 'false'
+
+        if not url or not name:
+            raise HTTPException(status_code=400, detail='url and name are required')
+
+        # Only HTTPS GitHub/GitLab/Bitbucket URLs.
+        import re as _re
+        if not _re.match(r'https?://(github|gitlab|bitbucket)\.', url):
+            raise HTTPException(
+                status_code=400,
+                detail='Only HTTPS GitHub, GitLab, or Bitbucket URLs are accepted.',
+            )
+
+        clone_root = Path.home() / '.marco' / 'clones'
+        clone_root.mkdir(parents=True, exist_ok=True)
+
+        # Normalize name → safe dir name.
+        safe_name = ''.join(ch if ch.isalnum() or ch in '-_' else '-' for ch in name).strip('-') or 'workspace'
+        dest = clone_root / safe_name
+        if dest.exists():
+            raise HTTPException(
+                status_code=409,
+                detail=f'Clone destination already exists: {dest}. Choose a different name.',
+            )
+
+        cmd = ['git', 'clone']
+        if shallow:
+            cmd += ['--depth', '1']
+        if branch:
+            cmd += ['--branch', branch]
+        cmd += ['--', url, str(dest)]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail='git clone timed out after 120 seconds')
+        except FileNotFoundError:
+            raise HTTPException(status_code=500, detail='git not found on this server')
+
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f'git clone failed: {result.stderr.strip()[:500]}',
+            )
+
+        try:
+            ws = add_workspace(safe_name, dest, registry_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        audit_record('workspace.clone', workspace=ws.name, params={'url': url, 'dest': ws.path})
+        return asdict(ws)
+
     # ---------- API: read-only repo intel ----------
 
     @app.get('/api/doctor')
@@ -996,7 +1068,7 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
                             tools=chat_tools.TOOL_SCHEMAS,
                             tool_choice='auto',
                             config=active_cfg,
-                            max_tokens=1500,
+                            max_tokens=4096,
                         )
                         choice = (response.get('choices') or [{}])[0]
                         msg = choice.get('message') or {}
@@ -1055,7 +1127,7 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
                                 'role': 'tool',
                                 'tool_call_id': tc.get('id'),
                                 'name': tool_name,
-                                'content': json.dumps(result)[:6000],
+                                'content': json.dumps(result)[:16000],
                             })
 
                     # Exhausted iterations without a final text response.

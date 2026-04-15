@@ -128,6 +128,93 @@ class DashboardStillRendersTests(UiShellTestBase):
         self.assertIn('Start tutorial', body)
         # Help link in nav.
         self.assertIn('Cheat sheet', body)
+        # Add-workspace modal trigger present.
+        self.assertIn('Add workspace', body)
+
+
+class ValidatePathTests(UiShellTestBase):
+    def test_existing_dir_returns_exists_true(self) -> None:
+        res = self.client.post(
+            '/api/validate-path', json={'path': str(self.repo)}, headers=self.headers
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['exists'])
+        self.assertTrue(data['is_git'])
+
+    def test_missing_path_returns_exists_false(self) -> None:
+        res = self.client.post(
+            '/api/validate-path', json={'path': '/does/not/exist/9x9'}, headers=self.headers
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.json()['exists'])
+
+    def test_empty_path_rejected(self) -> None:
+        res = self.client.post('/api/validate-path', json={'path': ''}, headers=self.headers)
+        self.assertEqual(res.status_code, 400)
+
+
+class CloneWorkspaceTests(UiShellTestBase):
+    def test_non_https_url_rejected(self) -> None:
+        res = self.client.post(
+            '/api/workspaces/clone',
+            json={'url': 'git@github.com:user/repo.git', 'name': 'test'},
+            headers=self.headers,
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_random_https_url_rejected(self) -> None:
+        res = self.client.post(
+            '/api/workspaces/clone',
+            json={'url': 'https://example.com/repo.git', 'name': 'test'},
+            headers=self.headers,
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_missing_fields_rejected(self) -> None:
+        res = self.client.post(
+            '/api/workspaces/clone',
+            json={'url': 'https://github.com/user/repo.git'},
+            headers=self.headers,
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_clone_invokes_git(self) -> None:
+        import subprocess as _sp
+
+        # The endpoint clones into Path.home() / '.marco' / 'clones' / <name>.
+        # We intercept subprocess.run and actually create that directory so that
+        # add_workspace's existence check passes.
+        clone_root = Path.home() / '.marco' / 'clones'
+        dest = clone_root / 'marco-test-clone-deleteme'
+
+        git_called: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            git_called.append(cmd)
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / '.git').mkdir(exist_ok=True)
+            return _sp.CompletedProcess(cmd, returncode=0, stdout='', stderr='')
+
+        try:
+            with mock.patch('subprocess.run', side_effect=fake_run):
+                res = self.client.post(
+                    '/api/workspaces/clone',
+                    json={'url': 'https://github.com/user/myrepo.git', 'name': 'marco-test-clone-deleteme'},
+                    headers=self.headers,
+                )
+            self.assertEqual(res.status_code, 200, res.text)
+            self.assertTrue(any('git' in str(c) for c in git_called), 'git was never called')
+            data = res.json()
+            self.assertEqual(data['name'], 'marco-test-clone-deleteme')
+        finally:
+            # Clean up the real directory we created.
+            import shutil
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            # Remove the workspace we registered so it doesn't pollute other tests.
+            from src.marco_v3.server_workspaces import remove_workspace
+            remove_workspace('marco-test-clone-deleteme')
 
 
 if __name__ == '__main__':

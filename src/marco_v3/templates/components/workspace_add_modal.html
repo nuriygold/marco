@@ -1,0 +1,100 @@
+{# Full-screen modal for adding a workspace.
+   Included once in base.html; opened/closed via marcoWorkspaceModalOpen/Close() in app.js.
+
+   Modes:
+     local  — user provides an absolute path that already exists on disk.
+     remote — user provides an HTTPS GitHub/GitLab/Bitbucket URL; server runs git clone.
+#}
+<div id="marco-workspace-modal"
+     class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4"
+     role="dialog" aria-modal="true" aria-labelledby="marco-ws-modal-title">
+
+  <div class="w-full max-w-md rounded-xl border border-slate-700 bg-hull p-6 shadow-2xl">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 id="marco-ws-modal-title" class="text-base font-semibold text-foam">Add workspace</h2>
+      <button type="button" onclick="marcoWorkspaceModalClose()"
+              class="rounded p-1 text-slate-400 hover:text-white" aria-label="Close">✕</button>
+    </div>
+
+    <!-- Mode toggle -->
+    <div class="mb-4 flex gap-3 text-sm">
+      <label class="flex cursor-pointer items-center gap-2">
+        <input type="radio" name="ws-mode" value="local" id="ws-mode-local" checked
+               class="accent-beacon" onchange="marcoWsModeChange('local')">
+        <span class="text-slate-200">Local path</span>
+      </label>
+      <label class="flex cursor-pointer items-center gap-2">
+        <input type="radio" name="ws-mode" value="remote" id="ws-mode-remote"
+               class="accent-beacon" onchange="marcoWsModeChange('remote')">
+        <span class="text-slate-200">Remote URL (clone)</span>
+      </label>
+    </div>
+
+    <form id="marco-ws-form" onsubmit="return marcoWorkspaceSubmit(event)" class="space-y-3">
+
+      <!-- Local path fields -->
+      <div id="ws-local-fields" class="space-y-3">
+        <div>
+          <label for="ws-path" class="mb-1 block text-xs text-slate-400">Absolute path</label>
+          <div class="flex gap-2">
+            <input id="ws-path" name="path" type="text" autocomplete="off"
+                   placeholder="/Users/you/projects/my-repo"
+                   class="min-w-0 flex-1 rounded bg-slate-900 px-3 py-2 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-beacon" />
+            <button type="button" onclick="marcoValidatePath()"
+                    class="shrink-0 rounded bg-slate-800 px-3 py-2 text-xs text-slate-300 hover:bg-slate-700">
+              Check
+            </button>
+          </div>
+          <div id="ws-path-status" class="mt-1 text-xs"></div>
+        </div>
+      </div>
+
+      <!-- Remote URL fields (hidden by default) -->
+      <div id="ws-remote-fields" class="hidden space-y-3">
+        <div>
+          <label for="ws-url" class="mb-1 block text-xs text-slate-400">Repository URL</label>
+          <input id="ws-url" name="url" type="url" autocomplete="off"
+                 placeholder="https://github.com/user/repo.git"
+                 class="w-full rounded bg-slate-900 px-3 py-2 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-beacon" />
+          <p class="mt-1 text-[10px] text-slate-500">HTTPS GitHub, GitLab, or Bitbucket URL.</p>
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label for="ws-branch" class="mb-1 block text-xs text-slate-400">Branch (optional)</label>
+            <input id="ws-branch" name="branch" type="text" placeholder="main"
+                   class="w-full rounded bg-slate-900 px-3 py-2 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-beacon" />
+          </div>
+          <label class="mt-5 flex items-center gap-2 text-xs text-slate-400">
+            <input type="checkbox" id="ws-shallow" name="shallow" checked class="accent-beacon">
+            Shallow clone
+          </label>
+        </div>
+      </div>
+
+      <!-- Shared: workspace nickname -->
+      <div>
+        <label for="ws-name" class="mb-1 block text-xs text-slate-400">Workspace name</label>
+        <input id="ws-name" name="name" type="text" autocomplete="off"
+               placeholder="my-repo"
+               maxlength="50"
+               class="w-full rounded bg-slate-900 px-3 py-2 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-beacon" />
+        <p class="mt-1 text-[10px] text-slate-500">Short unique identifier (letters, numbers, hyphens).</p>
+      </div>
+
+      <!-- Error banner -->
+      <div id="ws-error" class="hidden rounded bg-red-900/40 px-3 py-2 text-xs text-red-300 ring-1 ring-red-700"></div>
+
+      <!-- Actions -->
+      <div class="flex justify-end gap-2 pt-1">
+        <button type="button" onclick="marcoWorkspaceModalClose()"
+                class="rounded bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700">
+          Cancel
+        </button>
+        <button id="ws-submit-btn" type="submit"
+                class="rounded bg-rope px-4 py-2 text-sm font-medium text-hull hover:opacity-90 disabled:opacity-50">
+          Add workspace
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
