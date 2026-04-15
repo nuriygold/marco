@@ -39,6 +39,35 @@ def _msg_with_content(content: str):
     }
 
 
+def _parse_sse_events(text: str) -> list[tuple[str, dict]]:
+    """Parse SSE response body into [(event_name, data_dict), …]."""
+    events: list[tuple[str, dict]] = []
+    current_event: str | None = None
+    current_data: list[str] = []
+    for line in text.splitlines():
+        if line.startswith('event: '):
+            current_event = line[7:]
+        elif line.startswith('data: '):
+            current_data.append(line[6:])
+        elif line == '' and current_event is not None:
+            raw = '\n'.join(current_data)
+            try:
+                events.append((current_event, json.loads(raw)))
+            except json.JSONDecodeError:
+                events.append((current_event, {}))
+            current_event = None
+            current_data = []
+    return events
+
+
+def _get_done(text: str) -> dict | None:
+    """Return the payload of the first 'done' SSE event, or None."""
+    for name, data in _parse_sse_events(text):
+        if name == 'done':
+            return data
+    return None
+
+
 class ChatOrchestratorTests(unittest.TestCase):
     def setUp(self) -> None:
         try:
@@ -87,6 +116,7 @@ class ChatOrchestratorTests(unittest.TestCase):
         self.assertEqual(res.status_code, 503)
 
     def test_direct_response_no_tools(self) -> None:
+        # "hello" is neither heavy nor light → defaults to heavy, bypasses lite gate.
         with mock.patch.dict('os.environ', self.env, clear=True):
             with mock.patch(
                 'src.marco_v3.llm.chat_completion',
@@ -94,17 +124,19 @@ class ChatOrchestratorTests(unittest.TestCase):
             ):
                 res = self.client.post(
                     '/api/ai/chat',
-                    json={'message': 'hi'},
+                    json={'message': 'hello', 'force_heavy': True},
                     headers=self.headers,
                 )
         self.assertEqual(res.status_code, 200, res.text)
-        body = res.json()
-        self.assertEqual(body['assistant']['role'], 'assistant')
-        self.assertIn('Rudolph', body['assistant']['content'])
-        self.assertEqual(body['assistant']['tools_used'], [])
+        done = _get_done(res.text)
+        self.assertIsNotNone(done, f'no done event in SSE stream: {res.text!r}')
+        self.assertEqual(done['role'], 'assistant')
+        self.assertIn('Rudolph', done['content'])
+        self.assertEqual(done['tools_used'], [])
 
     def test_tool_call_then_response(self) -> None:
         # Simulate: user asks, model calls workspace_status, then responds.
+        # force_heavy=True bypasses the lite-gate (message contains "what").
         responses = iter([
             _msg_with_tool_call('workspace_status', {}, call_id='c1'),
             _msg_with_content('Your workspace has some files.'),
@@ -117,12 +149,13 @@ class ChatOrchestratorTests(unittest.TestCase):
             with mock.patch('src.marco_v3.llm.chat_completion', side_effect=fake_chat):
                 res = self.client.post(
                     '/api/ai/chat',
-                    json={'message': 'what is in this repo?'},
+                    json={'message': 'what is in this repo?', 'force_heavy': True},
                     headers=self.headers,
                 )
         self.assertEqual(res.status_code, 200, res.text)
-        body = res.json()
-        tools = body['assistant']['tools_used']
+        done = _get_done(res.text)
+        self.assertIsNotNone(done, f'no done event in SSE stream: {res.text!r}')
+        tools = done['tools_used']
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0]['name'], 'workspace_status')
         self.assertIn('file_count', tools[0]['result'])
@@ -145,12 +178,13 @@ class ChatOrchestratorTests(unittest.TestCase):
             with mock.patch('src.marco_v3.llm.chat_completion', side_effect=fake_chat):
                 res = self.client.post(
                     '/api/ai/chat',
-                    json={'message': 'bump sample.py value to 42'},
+                    json={'message': 'bump sample.py value to 42', 'force_heavy': True},
                     headers=self.headers,
                 )
         self.assertEqual(res.status_code, 200, res.text)
-        body = res.json()
-        tool_result = body['assistant']['tools_used'][0]['result']
+        done = _get_done(res.text)
+        self.assertIsNotNone(done, f'no done event in SSE stream: {res.text!r}')
+        tool_result = done['tools_used'][0]['result']
         self.assertIn('proposal', tool_result)
         self.assertEqual(tool_result['proposal']['status'], 'pending')
         # File untouched — staging must not apply.

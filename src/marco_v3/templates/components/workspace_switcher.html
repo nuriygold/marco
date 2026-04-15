@@ -21,6 +21,13 @@
     {% if active %}
       <p class="mt-1 truncate text-[10px] text-slate-500" title="{{ active.path }}">{{ active.path }}</p>
     {% endif %}
+    <button type="button"
+            onclick="marcoRemoveWorkspace('{{ active.name if active else '' }}')"
+            title="Remove active workspace from registry (does not delete files)"
+            class="mt-1 text-[10px] text-slate-600 hover:text-red-400"
+            {% if not active %}disabled{% endif %}>
+      − Remove active
+    </button>
   {% else %}
     <p class="text-xs text-slate-400">No workspaces yet.</p>
   {% endif %}

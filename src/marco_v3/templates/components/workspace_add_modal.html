@@ -55,8 +55,12 @@
           <label for="ws-url" class="mb-1 block text-xs text-slate-400">Repository URL</label>
           <input id="ws-url" name="url" type="url" autocomplete="off"
                  placeholder="https://github.com/user/repo.git"
+                 oninput="marcoWsUpdateCloneDest(this.value)"
                  class="w-full rounded bg-slate-900 px-3 py-2 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-beacon" />
-          <p class="mt-1 text-[10px] text-slate-500">HTTPS GitHub, GitLab, or Bitbucket URL.</p>
+          <p class="mt-1 text-[10px] text-slate-500">
+            HTTPS GitHub, GitLab, or Bitbucket URL.
+            Clones to: <code id="ws-clone-dest-hint" class="text-slate-300">~/.marco/clones/&lt;name&gt;</code>
+          </p>
         </div>
         <div class="flex gap-3">
           <div class="flex-1">

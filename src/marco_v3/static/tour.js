@@ -6,6 +6,9 @@
 
 const MARCO_TOUR_KEY = 'marco.tour.v1';
 
+// Active resize/scroll listener reference — tracked so it can be removed on teardown.
+let _marcoTourReposition = null;
+
 const TOUR_STEPS = [
   {
     route: '/',
@@ -21,8 +24,8 @@ const TOUR_STEPS = [
     selector: '#marco-workspace-switcher',
     title: 'Workspaces',
     what: 'A workspace is a registered repo on disk. Marco operates on one workspace at a time.',
-    when: 'Switch here when you want Marco to target a different repo. Use Quick-add to register nearby repos with one click.',
-    best: 'Prefer Quick-add over typing a path — it auto-detects git repos under MARCO_WORKSPACE_ROOT and skips ones already registered.',
+    when: 'Switch here when you want Marco to target a different repo. Use "+ Add workspace" to register a local path or clone a remote URL.',
+    best: 'Local path mode auto-validates the directory and pre-fills the name. Remote URL mode runs a shallow git clone into ~/.marco/clones/.',
     placement: 'right',
   },
   {
@@ -160,11 +163,15 @@ function _marcoTourShow(index) {
   card.querySelector('[data-act="back"]').addEventListener('click', () => { if (index > 0) _marcoTourShow(index - 1); });
   card.querySelector('[data-act="next"]').addEventListener('click', () => _marcoTourShow(index + 1));
 
-  const position = () => _marcoTourPosition(target, highlight, card, step.placement);
-  position();
-  window.addEventListener('resize', position);
-  window.addEventListener('scroll', position, { passive: true });
-  card._marcoReposition = position;
+  // Remove any previous reposition listener before adding a new one.
+  if (_marcoTourReposition) {
+    window.removeEventListener('resize', _marcoTourReposition);
+    window.removeEventListener('scroll', _marcoTourReposition);
+  }
+  _marcoTourReposition = () => _marcoTourPosition(target, highlight, card, step.placement);
+  _marcoTourReposition();
+  window.addEventListener('resize', _marcoTourReposition);
+  window.addEventListener('scroll', _marcoTourReposition, { passive: true });
 
   // Keyboard navigation.
   document.addEventListener('keydown', _marcoTourKey);
@@ -172,13 +179,8 @@ function _marcoTourShow(index) {
 
 function _marcoTourKey(ev) {
   if (ev.key === 'Escape') _marcoTourClose('skipped');
-  else if (ev.key === 'ArrowRight') {
-    const idx = Number(document.getElementById('marco-tour-card')?.dataset.idx ?? -1);
-    // fall through via Next button
-    document.querySelector('#marco-tour-card [data-act="next"]')?.click();
-  } else if (ev.key === 'ArrowLeft') {
-    document.querySelector('#marco-tour-card [data-act="back"]')?.click();
-  }
+  else if (ev.key === 'ArrowRight') document.querySelector('#marco-tour-card [data-act="next"]')?.click();
+  else if (ev.key === 'ArrowLeft') document.querySelector('#marco-tour-card [data-act="back"]')?.click();
 }
 
 function _marcoTourPosition(target, highlight, card, placement) {
@@ -235,6 +237,11 @@ function _marcoTourTeardown() {
   document.getElementById('marco-tour-highlight')?.remove();
   document.getElementById('marco-tour-card')?.remove();
   document.removeEventListener('keydown', _marcoTourKey);
+  if (_marcoTourReposition) {
+    window.removeEventListener('resize', _marcoTourReposition);
+    window.removeEventListener('scroll', _marcoTourReposition);
+    _marcoTourReposition = null;
+  }
 }
 
 function _marcoEscape(s) {

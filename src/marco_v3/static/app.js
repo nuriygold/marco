@@ -172,6 +172,20 @@ function marcoWsModeChange(mode) {
   }
 }
 
+function marcoWsUpdateCloneDest(url) {
+  const hint = document.getElementById('ws-clone-dest-hint');
+  if (!hint) return;
+  // Extract the last path segment and strip .git suffix.
+  const segment = (url.split('/').pop() || '').replace(/\.git$/, '').trim();
+  const name = segment || '<name>';
+  hint.textContent = `~/.marco/clones/${name}`;
+  // Auto-fill the name field if empty.
+  const nameInput = document.getElementById('ws-name');
+  if (nameInput && !nameInput.value && segment) {
+    nameInput.value = segment.replace(/[^a-zA-Z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  }
+}
+
 async function marcoValidatePath() {
   const pathInput = document.getElementById('ws-path');
   const statusEl = document.getElementById('ws-path-status');
@@ -236,6 +250,21 @@ async function marcoWorkspaceSubmit(event) {
     submitBtn.textContent = 'Add workspace';
   }
   return false;
+}
+
+async function marcoRemoveWorkspace(name) {
+  if (!name) return;
+  if (!confirm(`Remove workspace "${name}" from the registry?\n\nThis does NOT delete any files on disk.`)) return;
+  try {
+    const res = await fetch(`/api/workspaces/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || res.statusText);
+    }
+    window.location.reload();
+  } catch (e) {
+    alert('Remove failed: ' + e.message);
+  }
 }
 
 async function marcoAIPlan(event) {
