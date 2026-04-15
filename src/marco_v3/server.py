@@ -294,6 +294,10 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
             request, 'audit.html', _page_context(entries=audit_tail(limit=200))
         )
 
+    @app.get('/help', response_class=HTMLResponse)
+    async def help_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(request, 'help.html', _page_context())
+
     # ---------- API: workspaces ----------
 
     @app.get('/api/workspaces')
@@ -303,6 +307,44 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
             'active': registry.active,
             'workspaces': [asdict(ws) for ws in registry.workspaces],
         }
+
+    @app.get('/api/workspaces/candidates')
+    async def api_workspace_candidates() -> dict[str, Any]:
+        """List git repos under MARCO_WORKSPACE_ROOT (default: ~) not yet registered.
+
+        Read-only; a one-level scan capped at 50 entries. Used by the sidebar's
+        quick-add UI so operators don't have to type absolute paths.
+        """
+        import os
+        from pathlib import Path as _P
+
+        root = _P(os.environ.get('MARCO_WORKSPACE_ROOT', str(_P.home()))).expanduser()
+        registry = load_registry(registry_path)
+        registered_paths = {_P(ws.path).resolve() for ws in registry.workspaces}
+        registered_names = {ws.name for ws in registry.workspaces}
+
+        candidates: list[dict[str, str]] = []
+        if root.exists() and root.is_dir():
+            try:
+                entries = sorted(os.scandir(root), key=lambda e: e.name.lower())
+            except PermissionError:
+                entries = []
+            for entry in entries:
+                if len(candidates) >= 50:
+                    break
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                path = _P(entry.path).resolve()
+                if not (path / '.git').exists():
+                    continue
+                if path in registered_paths:
+                    continue
+                name = entry.name
+                # Skip candidates whose nickname collides with an existing workspace.
+                if name in registered_names:
+                    continue
+                candidates.append({'name': name, 'path': str(path)})
+        return {'root': str(root), 'candidates': candidates}
 
     @app.post('/api/workspaces')
     async def api_add_workspace(payload: dict[str, str]) -> dict[str, Any]:
@@ -336,6 +378,78 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
             raise HTTPException(status_code=404, detail='unknown workspace')
         audit_record('workspace.remove', workspace=name, params={})
         return {'removed': name}
+
+    @app.post('/api/validate-path')
+    async def api_validate_path(payload: dict[str, str]) -> dict[str, Any]:
+        """Check whether a local path exists and is a directory."""
+        raw = payload.get('path') or ''
+        if not raw:
+            raise HTTPException(status_code=400, detail='path is required')
+        resolved = Path(raw).expanduser().resolve()
+        return {
+            'exists': resolved.exists() and resolved.is_dir(),
+            'resolved': str(resolved),
+            'is_git': (resolved / '.git').exists(),
+        }
+
+    @app.post('/api/workspaces/clone')
+    async def api_clone_workspace(payload: dict[str, str]) -> dict[str, Any]:
+        """Shallow-clone a remote git URL then register the result as a workspace."""
+        url = (payload.get('url') or '').strip()
+        name = (payload.get('name') or '').strip()
+        branch = (payload.get('branch') or '').strip()
+        shallow = str(payload.get('shallow', 'true')).lower() != 'false'
+
+        if not url or not name:
+            raise HTTPException(status_code=400, detail='url and name are required')
+
+        # Only HTTPS GitHub/GitLab/Bitbucket URLs.
+        import re as _re
+        if not _re.match(r'https?://(github|gitlab|bitbucket)\.', url):
+            raise HTTPException(
+                status_code=400,
+                detail='Only HTTPS GitHub, GitLab, or Bitbucket URLs are accepted.',
+            )
+
+        clone_root = Path.home() / '.marco' / 'clones'
+        clone_root.mkdir(parents=True, exist_ok=True)
+
+        # Normalize name → safe dir name.
+        safe_name = ''.join(ch if ch.isalnum() or ch in '-_' else '-' for ch in name).strip('-') or 'workspace'
+        dest = clone_root / safe_name
+        if dest.exists():
+            raise HTTPException(
+                status_code=409,
+                detail=f'Clone destination already exists: {dest}. Choose a different name.',
+            )
+
+        cmd = ['git', 'clone']
+        if shallow:
+            cmd += ['--depth', '1']
+        if branch:
+            cmd += ['--branch', branch]
+        cmd += ['--', url, str(dest)]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail='git clone timed out after 120 seconds')
+        except FileNotFoundError:
+            raise HTTPException(status_code=500, detail='git not found on this server')
+
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f'git clone failed: {result.stderr.strip()[:500]}',
+            )
+
+        try:
+            ws = add_workspace(safe_name, dest, registry_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        audit_record('workspace.clone', workspace=ws.name, params={'url': url, 'dest': ws.path})
+        return asdict(ws)
 
     # ---------- API: read-only repo intel ----------
 
@@ -954,7 +1068,7 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
                             tools=chat_tools.TOOL_SCHEMAS,
                             tool_choice='auto',
                             config=active_cfg,
-                            max_tokens=1500,
+                            max_tokens=4096,
                         )
                         choice = (response.get('choices') or [{}])[0]
                         msg = choice.get('message') or {}
@@ -1013,7 +1127,7 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
                                 'role': 'tool',
                                 'tool_call_id': tc.get('id'),
                                 'name': tool_name,
-                                'content': json.dumps(result)[:6000],
+                                'content': json.dumps(result)[:16000],
                             })
 
                     # Exhausted iterations without a final text response.

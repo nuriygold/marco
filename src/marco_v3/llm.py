@@ -29,6 +29,7 @@ are set for the selected provider):
     MARCO_LLM_TIMEOUT         default: 60 (seconds)
     MARCO_LLM_MAX_RETRIES     default: 2
     MARCO_LLM_MAX_TOKEN_FIELD override max_tokens / max_completion_tokens auto-detect
+    MARCO_LLM_CHAT_MAX_TOKENS  default token budget for chat completions (default: 4096)
 """
 
 from __future__ import annotations
@@ -257,7 +258,7 @@ def chat_completion(
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
     temperature: float = 0.2,
-    max_tokens: int = 1200,
+    max_tokens: int | None = None,
     client: httpx.Client | None = None,
 ) -> dict[str, Any]:
     """Send a chat completion request and return the parsed JSON response.
@@ -268,10 +269,13 @@ def chat_completion(
     """
     cfg = config or load_config()
 
+    # Resolve token budget: caller → env var → 4096 default.
+    _max_tokens: int = max_tokens or int(os.environ.get('MARCO_LLM_CHAT_MAX_TOKENS', '4096'))
+
     payload: dict[str, Any] = {
         'messages': messages,
         'temperature': temperature,
-        cfg.tokens_field: max_tokens,
+        cfg.tokens_field: _max_tokens,
     }
     if response_format is not None:
         payload['response_format'] = response_format
@@ -387,7 +391,7 @@ def generate_plan(
     """Turn a goal into a structured plan using the configured LLM."""
     user_prompt = (
         f'Goal: {goal}\n\n'
-        f'Repo summary:\n{json.dumps(repo_summary, indent=2)[:3000]}'
+        f'Repo summary:\n{json.dumps(repo_summary, indent=2)[:8000]}'
     )
     response = chat_completion(
         messages=[
@@ -396,7 +400,7 @@ def generate_plan(
         ],
         response_format={'type': 'json_object'},
         temperature=0.2,
-        max_tokens=1000,
+        max_tokens=2000,
         config=config,
         client=client,
     )

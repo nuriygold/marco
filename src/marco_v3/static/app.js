@@ -42,6 +42,230 @@ async function marcoInitAIGates() {
 }
 
 document.addEventListener('DOMContentLoaded', marcoInitAIGates);
+document.addEventListener('DOMContentLoaded', marcoSidebarInit);
+document.addEventListener('DOMContentLoaded', marcoScrollHelpersInit);
+
+// ---------- Sidebar collapse (desktop icon-rail) ----------
+
+const MARCO_SIDEBAR_KEY = 'marco.sidebar';
+
+function marcoSidebarInit() {
+  const aside = document.getElementById('marco-sidebar');
+  if (!aside) return;
+  if (localStorage.getItem(MARCO_SIDEBAR_KEY) === 'collapsed') {
+    aside.classList.add('is-collapsed');
+    _marcoSidebarSyncAria(aside, true);
+  }
+}
+
+function marcoSidebarToggle() {
+  const aside = document.getElementById('marco-sidebar');
+  if (!aside) return;
+  const nowCollapsed = !aside.classList.contains('is-collapsed');
+  aside.classList.toggle('is-collapsed', nowCollapsed);
+  localStorage.setItem(MARCO_SIDEBAR_KEY, nowCollapsed ? 'collapsed' : 'expanded');
+  _marcoSidebarSyncAria(aside, nowCollapsed);
+}
+
+function _marcoSidebarSyncAria(aside, collapsed) {
+  const btn = aside.querySelector('.marco-sidebar-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-expanded', String(!collapsed));
+  btn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  btn.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+}
+
+// ---------- Console: floating scroll helpers ----------
+
+function marcoScrollHelpersInit() {
+  const transcript = document.getElementById('marco-chat-transcript');
+  if (!transcript) return;  // only runs on /console
+
+  const container = document.createElement('div');
+  container.className = 'marco-scroll-helpers';
+  container.innerHTML = `
+    <button type="button" id="marco-scroll-top"
+            class="rounded-full bg-hull/95 p-2 text-slate-200 shadow-lg ring-1 ring-slate-700 hover:text-white is-hidden"
+            title="Jump to earliest message" aria-label="Jump to earliest message">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+        <polyline points="18 15 12 9 6 15"/>
+      </svg>
+    </button>
+    <button type="button" id="marco-scroll-bottom"
+            class="rounded-full bg-hull/95 p-2 text-slate-200 shadow-lg ring-1 ring-slate-700 hover:text-white is-hidden"
+            title="Jump to most recent message" aria-label="Jump to most recent message">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
+  `;
+  document.body.appendChild(container);
+
+  const topBtn = document.getElementById('marco-scroll-top');
+  const bottomBtn = document.getElementById('marco-scroll-bottom');
+
+  topBtn.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  bottomBtn.addEventListener('click', () => {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  });
+
+  // Show helpers only when there's something to scroll to.
+  const update = () => {
+    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+    const viewport = window.innerHeight;
+    const total = document.documentElement.scrollHeight;
+    const atTop = scrollTop < 80;
+    const atBottom = scrollTop + viewport >= total - 80;
+    const scrollable = total > viewport + 40;
+    topBtn.classList.toggle('is-hidden', !scrollable || atTop);
+    bottomBtn.classList.toggle('is-hidden', !scrollable || atBottom);
+  };
+  update();
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update);
+  // New messages append — re-evaluate.
+  new MutationObserver(update).observe(transcript, { childList: true, subtree: true });
+}
+
+// ---------- Workspace: add modal ----------
+
+function marcoWorkspaceModalOpen() {
+  const modal = document.getElementById('marco-workspace-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.getElementById('ws-name')?.focus();
+  document.addEventListener('keydown', _marcoWsModalKey);
+}
+
+function marcoWorkspaceModalClose() {
+  const modal = document.getElementById('marco-workspace-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  document.removeEventListener('keydown', _marcoWsModalKey);
+  // Reset form state.
+  document.getElementById('marco-ws-form')?.reset();
+  marcoWsModeChange('local');
+  const errEl = document.getElementById('ws-error');
+  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  const statusEl = document.getElementById('ws-path-status');
+  if (statusEl) { statusEl.textContent = ''; }
+}
+
+function _marcoWsModalKey(ev) {
+  if (ev.key === 'Escape') marcoWorkspaceModalClose();
+}
+
+function marcoWsModeChange(mode) {
+  const localFields = document.getElementById('ws-local-fields');
+  const remoteFields = document.getElementById('ws-remote-fields');
+  if (!localFields || !remoteFields) return;
+  if (mode === 'local') {
+    localFields.classList.remove('hidden');
+    remoteFields.classList.add('hidden');
+  } else {
+    localFields.classList.add('hidden');
+    remoteFields.classList.remove('hidden');
+  }
+}
+
+function marcoWsUpdateCloneDest(url) {
+  const hint = document.getElementById('ws-clone-dest-hint');
+  if (!hint) return;
+  // Extract the last path segment and strip .git suffix.
+  const segment = (url.split('/').pop() || '').replace(/\.git$/, '').trim();
+  const name = segment || '<name>';
+  hint.textContent = `~/.marco/clones/${name}`;
+  // Auto-fill the name field if empty.
+  const nameInput = document.getElementById('ws-name');
+  if (nameInput && !nameInput.value && segment) {
+    nameInput.value = segment.replace(/[^a-zA-Z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  }
+}
+
+async function marcoValidatePath() {
+  const pathInput = document.getElementById('ws-path');
+  const statusEl = document.getElementById('ws-path-status');
+  const path = (pathInput?.value || '').trim();
+  if (!path) { statusEl.textContent = '⚠ Enter a path first.'; statusEl.className = 'mt-1 text-xs text-amber-400'; return; }
+  statusEl.textContent = 'Checking…'; statusEl.className = 'mt-1 text-xs text-slate-400';
+  try {
+    const data = await marcoPost('/api/validate-path', { path });
+    if (data.exists) {
+      const git = data.is_git ? ' · git repo detected' : '';
+      statusEl.textContent = `✓ Found${git}`;
+      statusEl.className = 'mt-1 text-xs text-emerald-400';
+      // Auto-fill name from the last path segment if empty.
+      const nameInput = document.getElementById('ws-name');
+      if (nameInput && !nameInput.value) {
+        nameInput.value = data.resolved.split('/').filter(Boolean).pop() || '';
+      }
+    } else {
+      statusEl.textContent = '✗ Path does not exist or is not a directory.';
+      statusEl.className = 'mt-1 text-xs text-red-400';
+    }
+  } catch (e) {
+    statusEl.textContent = '✗ ' + e.message;
+    statusEl.className = 'mt-1 text-xs text-red-400';
+  }
+}
+
+async function marcoWorkspaceSubmit(event) {
+  if (event) event.preventDefault();
+  const errEl = document.getElementById('ws-error');
+  const submitBtn = document.getElementById('ws-submit-btn');
+  const hideErr = () => { errEl?.classList.add('hidden'); };
+  const showErr = (msg) => {
+    if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+  };
+
+  const mode = document.querySelector('input[name="ws-mode"]:checked')?.value || 'local';
+  const name = (document.getElementById('ws-name')?.value || '').trim();
+  if (!name) { showErr('Workspace name is required.'); return false; }
+
+  hideErr();
+  submitBtn.disabled = true;
+  submitBtn.textContent = mode === 'remote' ? 'Cloning…' : 'Registering…';
+
+  try {
+    if (mode === 'local') {
+      const path = (document.getElementById('ws-path')?.value || '').trim();
+      if (!path) { showErr('Path is required.'); return false; }
+      await marcoPost('/api/workspaces', { name, path });
+    } else {
+      const url = (document.getElementById('ws-url')?.value || '').trim();
+      const branch = (document.getElementById('ws-branch')?.value || '').trim();
+      const shallow = document.getElementById('ws-shallow')?.checked !== false;
+      if (!url) { showErr('Repository URL is required.'); return false; }
+      await marcoPost('/api/workspaces/clone', { name, url, branch, shallow: String(shallow) });
+    }
+    marcoWorkspaceModalClose();
+    window.location.reload();
+  } catch (e) {
+    showErr(e.message || 'Failed to add workspace.');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Add workspace';
+  }
+  return false;
+}
+
+async function marcoRemoveWorkspace(name) {
+  if (!name) return;
+  if (!confirm(`Remove workspace "${name}" from the registry?\n\nThis does NOT delete any files on disk.`)) return;
+  try {
+    const res = await fetch(`/api/workspaces/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || res.statusText);
+    }
+    window.location.reload();
+  } catch (e) {
+    alert('Remove failed: ' + e.message);
+  }
+}
 
 async function marcoAIPlan(event) {
   if (event) event.preventDefault();
@@ -219,7 +443,7 @@ async function _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, send
           bodyEl.textContent = 'Error: ' + err.message;
           bodyEl.className += ' text-red-400';
         }
-        transcript.scrollTop = transcript.scrollHeight;
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
       }
     }
   } catch (e) {
@@ -247,7 +471,7 @@ async function marcoChatSend(event) {
 
   // Echo user message immediately.
   transcript.appendChild(marcoChatRenderMessage({ role: 'user', content: message }));
-  transcript.scrollTop = transcript.scrollHeight;
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
   input.value = '';
 
   // Create the assistant bubble once — _marcoChatStream fills it in.
@@ -266,7 +490,7 @@ async function marcoChatSend(event) {
   assistantBubble.append(roleLabel, bodyEl, toolsEl);
   assistantWrap.appendChild(assistantBubble);
   transcript.appendChild(assistantWrap);
-  transcript.scrollTop = transcript.scrollHeight;
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 
   await _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, sendBtn, input, {});
   return false;

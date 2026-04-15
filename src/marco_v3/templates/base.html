@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<html lang="en" class="h-full bg-[#081428] text-slate-100">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,6 +14,14 @@
           fontFamily: {
             mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
           },
+          colors: {
+            // Nautical accents layered on top of Tailwind's slate.
+            hull:   '#0b1d3a',  // deep navy
+            deck:   '#122b52',  // raised panel
+            rope:   '#c9a87c',  // gold rope / primary accent
+            beacon: '#38bdf8',  // active nav / signal
+            foam:   '#dbeafe',  // highlight text
+          },
         },
       },
     };
@@ -21,34 +29,24 @@
 </head>
 <body class="h-full font-sans antialiased">
   <!-- Mobile full-screen nav drawer (hidden by default) -->
-  <aside id="marco-mobile-nav" class="fixed inset-0 z-40 hidden flex-col bg-slate-900 p-4 md:hidden">
+  <aside id="marco-mobile-nav" class="fixed inset-0 z-40 hidden flex-col bg-hull p-4 md:hidden">
     <div class="mb-4 flex items-center justify-between">
-      <div>
-        <div class="text-xl font-semibold tracking-tight">Marco</div>
-        <div class="text-xs text-slate-400">operator console</div>
-      </div>
+      <a href="/" class="flex items-center gap-3" onclick="marcoNavClose()">
+        {% include 'components/logo.html' %}
+        <div>
+          <div class="text-xl font-semibold tracking-tight">Marco</div>
+          <div class="text-xs text-slate-400">operator console</div>
+        </div>
+      </a>
       <button onclick="marcoNavClose()" class="rounded p-2 text-slate-400 hover:text-white" aria-label="Close menu">✕</button>
     </div>
 
     {% include 'components/workspace_switcher.html' %}
 
     <nav class="mt-6 space-y-1 text-sm">
-      {% set nav = [
-        ('/console', '✨ Console'),
-        ('/', 'Dashboard'),
-        ('/repo', 'Repo'),
-        ('/memory', 'Memory'),
-        ('/sessions', 'Sessions'),
-        ('/patches', 'Patches'),
-        ('/scripts', 'Scripts'),
-        ('/audit', 'Audit log')
-      ] %}
-      {% for href, label in nav %}
-        <a href="{{ href }}" onclick="marcoNavClose()"
-           class="block rounded px-3 py-2 transition {% if request.url.path == href or (href != '/' and request.url.path.startswith(href)) %}bg-emerald-500/10 text-emerald-300{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
-          {{ label }}
-        </a>
-      {% endfor %}
+      {% with active_mode = 'mobile' %}
+        {% include 'components/nav_items.html' %}
+      {% endwith %}
     </nav>
 
     <form action="/logout" method="post" class="mt-10">
@@ -58,36 +56,56 @@
 
   <div class="flex min-h-screen">
     <!-- Desktop sidebar (hidden on mobile) -->
-    <aside class="hidden w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900/80 p-4 md:flex">
-      <a href="/" class="block">
-        <div class="text-xl font-semibold tracking-tight">Marco</div>
-        <div class="text-xs text-slate-400">operator console</div>
-      </a>
+    <aside id="marco-sidebar"
+           class="hidden w-60 shrink-0 flex-col border-r border-slate-800 bg-hull/90 p-4 md:flex transition-[width,padding] duration-200">
+      <div class="flex items-center justify-between gap-2">
+        <a href="/" class="flex min-w-0 items-center gap-2" title="Marco">
+          {% include 'components/logo.html' %}
+          <div class="sidebar-label min-w-0">
+            <div class="truncate text-lg font-semibold tracking-tight">Marco</div>
+            <div class="truncate text-[11px] text-slate-400">operator console</div>
+          </div>
+        </a>
+        <button type="button"
+                onclick="marcoSidebarToggle()"
+                class="marco-sidebar-toggle rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                aria-label="Collapse sidebar"
+                aria-expanded="true"
+                title="Collapse sidebar (click to toggle)">
+          <svg class="h-4 w-4 transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+      </div>
 
-      {% include 'components/workspace_switcher.html' %}
+      <div id="marco-workspace-switcher" class="sidebar-label">
+        {% include 'components/workspace_switcher.html' %}
+      </div>
 
       <nav class="mt-6 space-y-1 text-sm">
-        {% set nav = [
-          ('/console', '✨ Console'),
-          ('/', 'Dashboard'),
-          ('/repo', 'Repo'),
-          ('/memory', 'Memory'),
-          ('/sessions', 'Sessions'),
-          ('/patches', 'Patches'),
-          ('/scripts', 'Scripts'),
-          ('/audit', 'Audit log')
-        ] %}
-        {% for href, label in nav %}
-          <a href="{{ href }}"
-             class="block rounded px-3 py-2 transition {% if request.url.path == href or (href != '/' and request.url.path.startswith(href)) %}bg-emerald-500/10 text-emerald-300{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
-            {{ label }}
-          </a>
-        {% endfor %}
+        {% with active_mode = 'desktop' %}
+          {% include 'components/nav_items.html' %}
+        {% endwith %}
       </nav>
 
-      <form action="/logout" method="post" class="mt-10">
-        <button class="text-xs text-slate-500 hover:text-slate-300">Sign out</button>
-      </form>
+      <div class="mt-auto pt-6">
+        <button type="button" onclick="marcoTourStart()"
+                class="sidebar-label block w-full rounded px-3 py-1 text-left text-[11px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                title="Start guided tour">
+          ⛵ Start tutorial
+        </button>
+        <form action="/logout" method="post" class="mt-2">
+          <button class="flex w-full items-center gap-2 rounded px-3 py-1 text-left text-xs text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+                  title="Sign out">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-4 w-4 shrink-0">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+              <polyline points="10 17 15 12 10 7"/>
+              <line x1="15" y1="12" x2="3" y2="12"/>
+            </svg>
+            <span class="sidebar-label">Sign out</span>
+          </button>
+        </form>
+      </div>
     </aside>
 
     <main class="flex-1 px-3 py-4 md:px-8 md:py-6">
@@ -126,6 +144,8 @@
       nav.classList.remove('flex');
     }
   </script>
+  {% include 'components/workspace_add_modal.html' %}
   <script src="/static/app.js" defer></script>
+  <script src="/static/tour.js" defer></script>
 </body>
 </html>

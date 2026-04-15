@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block title %}Cheat sheet{% endblock %}
+{% block heading %}Command cheat sheet{% endblock %}
+{% block subheading %}Terms, phrasings, and CLI equivalents — the reference you reach for mid-session.{% endblock %}
+
+{# If the CLI surface changes, update this from src/marco_v3/cli.py. #}
+
+{% block content %}
+<div class="mb-4 flex items-center gap-2 text-xs">
+  <button type="button" onclick="marcoTourStart()"
+          class="rounded bg-rope px-3 py-1 font-medium text-hull hover:opacity-90">
+    ⛵ Replay guided tour
+  </button>
+  <span class="text-slate-500">or skim below</span>
+</div>
+
+<div class="grid gap-6 md:grid-cols-2">
+
+  <!-- Console phrasings -->
+  <section class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-rope">Console phrasings</h2>
+    <p class="mb-3 text-xs text-slate-400">Type any of these on <a href="/console" class="text-beacon hover:underline">/console</a>. Marco routes to the matching tool.</p>
+    <ul class="space-y-2 text-sm">
+      <li><code class="text-emerald-300">show me the repo status</code> <span class="text-xs text-slate-500">→ workspace_status</span></li>
+      <li><code class="text-emerald-300">find all Python files</code> <span class="text-xs text-slate-500">→ find_files</span></li>
+      <li><code class="text-emerald-300">where do we use the database?</code> <span class="text-xs text-slate-500">→ lookup_content</span></li>
+      <li><code class="text-emerald-300">remember: we use JWT for service auth</code> <span class="text-xs text-slate-500">→ save_memory</span></li>
+      <li><code class="text-emerald-300">plan a refactor of the auth flow</code> <span class="text-xs text-slate-500">→ create_plan</span></li>
+      <li><code class="text-emerald-300">stage a patch that adds a version line to README.md</code> <span class="text-xs text-slate-500">→ suggest_patch</span></li>
+    </ul>
+  </section>
+
+  <!-- Page reference -->
+  <section class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-rope">Pages at a glance</h2>
+    <dl class="space-y-2 text-sm">
+      <div><dt class="inline text-beacon">Dashboard</dt> <dd class="inline text-slate-300">— active sessions, pending patches, recent activity.</dd></div>
+      <div><dt class="inline text-beacon">Console</dt> <dd class="inline text-slate-300">— plain-language chat; Marco picks the tool.</dd></div>
+      <div><dt class="inline text-beacon">Repo</dt> <dd class="inline text-slate-300">— file tree, routes, env vars, architecture map.</dd></div>
+      <div><dt class="inline text-beacon">Memory</dt> <dd class="inline text-slate-300">— notes / decisions / conventions + recall.</dd></div>
+      <div><dt class="inline text-beacon">Sessions</dt> <dd class="inline text-slate-300">— plan → execute → validate → recover.</dd></div>
+      <div><dt class="inline text-beacon">Patches</dt> <dd class="inline text-slate-300">— typed find/replace; typed-confirm to apply; one-click rollback.</dd></div>
+      <div><dt class="inline text-beacon">Scripts</dt> <dd class="inline text-slate-300">— allow-listed runs; dry-run by default.</dd></div>
+      <div><dt class="inline text-beacon">Audit log</dt> <dd class="inline text-slate-300">— every mutation with timestamp + params.</dd></div>
+    </dl>
+  </section>
+
+  <!-- Safety rules -->
+  <section class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-rope">Safety rules</h2>
+    <ul class="list-disc space-y-2 pl-5 text-sm text-slate-300">
+      <li>Applying a patch requires typing the patch name in the confirm box.</li>
+      <li>Running a script requires <code>{execute:true, confirm:true}</code> and an allow-listed prefix.</li>
+      <li>Rollbacks are one-click but also logged to <code>~/.marco/audit.log</code>.</li>
+      <li>The HTTP server forces <code>safety_mode=workspace-write</code>. <code>danger-full-access</code> is not reachable over HTTP.</li>
+      <li>The console never applies patches or runs scripts — those still require the Patches / Scripts UI.</li>
+    </ul>
+  </section>
+
+  <!-- CLI equivalents -->
+  <section class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-rope">CLI equivalents</h2>
+    <p class="mb-3 text-xs text-slate-400">From a shell on the Droplet — all routed through <code>src/marco_v3/cli.py</code>.</p>
+    <ul class="space-y-1 font-mono text-xs text-slate-200">
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">doctor</span></li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">status</span></li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">inspect</span> &lt;query&gt;</li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">plan</span> &lt;goal&gt;</li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">execute</span> &lt;session&gt;</li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">validate</span> &lt;session&gt;</li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">recover</span> &lt;session&gt;</li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">patch</span> propose|apply|rollback</li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">memory</span> add|list|recall</li>
+      <li><span class="text-slate-500">$</span> python3 -m src.main <span class="text-beacon">scaffold</span> page|component|route|service</li>
+    </ul>
+  </section>
+
+  <!-- Nautical glossary -->
+  <section class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 md:col-span-2">
+    <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-rope">Nautical glossary</h2>
+    <div class="grid gap-3 text-sm text-slate-300 md:grid-cols-3">
+      <div><strong class="text-beacon">Workspace</strong> — a registered repo. Marco steers one at a time.</div>
+      <div><strong class="text-beacon">Session</strong> — a multi-phase task (plan → execute → validate → recover).</div>
+      <div><strong class="text-beacon">Patch</strong> — a typed find/replace with an automatic checkpoint.</div>
+      <div><strong class="text-beacon">Memory</strong> — workspace-scoped notes / decisions / conventions.</div>
+      <div><strong class="text-beacon">Script</strong> — an allow-listed shell command, dry-run by default.</div>
+      <div><strong class="text-beacon">Audit</strong> — logbook of every mutation Marco made.</div>
+    </div>
+  </section>
+</div>
+{% endblock %}
