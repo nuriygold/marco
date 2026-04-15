@@ -6,6 +6,9 @@
 marco.example.com {
     encode zstd gzip
 
+    # Allow framing from same origin and the Claw mothership only.
+    header Content-Security-Policy "frame-ancestors 'self' https://claw.nuriy.com"
+
     # Long-lived SSE connections need a generous timeout.
     reverse_proxy 127.0.0.1:8765 {
         transport http {
