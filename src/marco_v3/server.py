@@ -392,9 +392,55 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
             'is_git': (resolved / '.git').exists(),
         }
 
+    _HTTPS_GIT_HOST_RE = re.compile(r'https?://(github|gitlab|bitbucket)\.')
+
+    @app.post('/api/workspaces/clone/preflight')
+    async def api_clone_preflight(payload: dict[str, str]) -> dict[str, Any]:
+        """Check that a remote git URL is reachable before committing to a full clone.
+
+        Runs ``git ls-remote --exit-code`` with a short timeout and returns
+        ``{ok, default_branch}`` so the UI can surface errors immediately.
+        """
+        url = (payload.get('url') or '').strip()
+        if not url:
+            raise HTTPException(status_code=400, detail='url is required')
+        if not _HTTPS_GIT_HOST_RE.match(url):
+            raise HTTPException(
+                status_code=400,
+                detail='Only HTTPS GitHub, GitLab, or Bitbucket URLs are accepted.',
+            )
+        try:
+            result = subprocess.run(
+                ['git', 'ls-remote', '--exit-code', '--symref', url, 'HEAD'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail='Repository did not respond within 10 seconds.')
+        except FileNotFoundError:
+            raise HTTPException(status_code=500, detail='git not found on this server')
+
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f'Cannot reach repository: {result.stderr.strip()[:300] or "unknown error"}',
+            )
+
+        # Parse default branch from symref output (e.g. "ref: refs/heads/main\tHEAD")
+        default_branch = None
+        for line in result.stdout.splitlines():
+            if line.startswith('ref: refs/heads/'):
+                default_branch = line.split('refs/heads/', 1)[1].split('\t')[0].strip()
+                break
+
+        return {'ok': True, 'default_branch': default_branch}
+
     @app.post('/api/workspaces/clone')
     async def api_clone_workspace(payload: dict[str, str]) -> dict[str, Any]:
         """Shallow-clone a remote git URL then register the result as a workspace."""
+        import shutil as _shutil
+
         url = (payload.get('url') or '').strip()
         name = (payload.get('name') or '').strip()
         branch = (payload.get('branch') or '').strip()
@@ -403,9 +449,7 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
         if not url or not name:
             raise HTTPException(status_code=400, detail='url and name are required')
 
-        # Only HTTPS GitHub/GitLab/Bitbucket URLs.
-        import re as _re
-        if not _re.match(r'https?://(github|gitlab|bitbucket)\.', url):
+        if not _HTTPS_GIT_HOST_RE.match(url):
             raise HTTPException(
                 status_code=400,
                 detail='Only HTTPS GitHub, GitLab, or Bitbucket URLs are accepted.',
@@ -433,11 +477,13 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         except subprocess.TimeoutExpired:
+            _shutil.rmtree(dest, ignore_errors=True)
             raise HTTPException(status_code=504, detail='git clone timed out after 120 seconds')
         except FileNotFoundError:
             raise HTTPException(status_code=500, detail='git not found on this server')
 
         if result.returncode != 0:
+            _shutil.rmtree(dest, ignore_errors=True)
             raise HTTPException(
                 status_code=422,
                 detail=f'git clone failed: {result.stderr.strip()[:500]}',

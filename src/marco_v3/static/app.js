@@ -131,13 +131,128 @@ function marcoScrollHelpersInit() {
 
 // ---------- Workspace: add modal ----------
 
-function marcoWorkspaceModalOpen() {
+// Cached workspace list fetched when the modal opens (used for name conflict checks).
+let _wsKnownWorkspaces = [];
+// Whether the remote URL pre-flight check has passed.
+let _wsPreflightOk = false;
+// Debounce timer handle for live path validation.
+let _wsPathDebounce = null;
+
+/** Mirror of server_workspaces._normalize_name — must stay in sync. */
+function _wsNormalizeName(raw) {
+  const safe = raw.trim().replace(/[^a-zA-Z0-9\-_]/g, '-');
+  return safe.replace(/^-+|-+$/g, '') || 'workspace';
+}
+
+function _wsSetNameStatus(msg, cls) {
+  const el = document.getElementById('ws-name-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = cls;
+}
+
+function _wsSetPathStatus(msg, cls) {
+  const el = document.getElementById('ws-path-status');
+  if (el) { el.textContent = msg; el.className = 'mt-1 text-xs ' + cls; }
+}
+
+function _wsSetUrlStatus(msg, cls) {
+  const el = document.getElementById('ws-url-status');
+  if (el) { el.textContent = msg; el.className = 'mt-1 text-xs ' + cls; }
+}
+
+async function marcoWorkspaceModalOpen() {
   const modal = document.getElementById('marco-workspace-modal');
   if (!modal) return;
   modal.classList.remove('hidden');
   modal.classList.add('flex');
-  document.getElementById('ws-name')?.focus();
   document.addEventListener('keydown', _marcoWsModalKey);
+
+  // Fetch workspace list for conflict detection + candidates for quick-pick.
+  try {
+    const [wsData, candData] = await Promise.all([
+      fetch('/api/workspaces').then(r => r.json()),
+      fetch('/api/workspaces/candidates').then(r => r.json()),
+    ]);
+    _wsKnownWorkspaces = (wsData.workspaces || []).map(ws => ws.name);
+    _wsRenderCandidates(candData.candidates || []);
+  } catch (_) {
+    _wsKnownWorkspaces = [];
+  }
+
+  _wsBindLiveEvents();
+  document.getElementById('ws-path')?.focus();
+}
+
+function _wsRenderCandidates(candidates) {
+  const container = document.getElementById('ws-candidates');
+  const list = document.getElementById('ws-candidates-list');
+  if (!container || !list || !candidates.length) return;
+
+  list.innerHTML = '';
+  candidates.slice(0, 8).forEach(c => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = c.name;
+    btn.className = 'rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-200 hover:bg-beacon/30 hover:text-white';
+    btn.addEventListener('click', () => {
+      const pathEl = document.getElementById('ws-path');
+      const nameEl = document.getElementById('ws-name');
+      if (pathEl) pathEl.value = c.path;
+      if (nameEl && !nameEl.value) nameEl.value = c.name;
+      _wsSetPathStatus('✓ Found · git repo detected', 'text-rope');
+      _wsCheckNameConflict(c.name);
+      document.getElementById('ws-name')?.focus();
+    });
+    list.appendChild(btn);
+  });
+
+  container.classList.remove('hidden');
+}
+
+function _wsBindLiveEvents() {
+  // Live path validation — debounced 300 ms.
+  const pathEl = document.getElementById('ws-path');
+  if (pathEl && !pathEl._wsBound) {
+    pathEl._wsBound = true;
+    pathEl.addEventListener('input', () => {
+      clearTimeout(_wsPathDebounce);
+      _wsPathDebounce = setTimeout(() => marcoValidatePath(), 300);
+    });
+    // Enter key triggers validation instead of form submit.
+    pathEl.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); marcoValidatePath(); }
+    });
+  }
+
+  // Live name normalization + conflict check.
+  const nameEl = document.getElementById('ws-name');
+  if (nameEl && !nameEl._wsBound) {
+    nameEl._wsBound = true;
+    nameEl.addEventListener('input', () => _wsCheckNameConflict(nameEl.value));
+  }
+
+  // Remote URL: Enter triggers pre-flight; blur also triggers it.
+  const urlEl = document.getElementById('ws-url');
+  if (urlEl && !urlEl._wsBound) {
+    urlEl._wsBound = true;
+    urlEl.addEventListener('blur', () => { if (urlEl.value.trim()) marcoWsPreflightUrl(); });
+    urlEl.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); marcoWsPreflightUrl(); }
+    });
+  }
+}
+
+function _wsCheckNameConflict(raw) {
+  if (!raw) { _wsSetNameStatus('', ''); return; }
+  const normalized = _wsNormalizeName(raw);
+  if (_wsKnownWorkspaces.includes(normalized)) {
+    _wsSetNameStatus(`✗ "${normalized}" already exists`, 'text-red-400');
+  } else if (normalized !== raw.trim()) {
+    _wsSetNameStatus(`→ will be saved as "${normalized}"`, 'text-slate-400');
+  } else {
+    _wsSetNameStatus('', '');
+  }
 }
 
 function marcoWorkspaceModalClose() {
@@ -146,13 +261,26 @@ function marcoWorkspaceModalClose() {
   modal.classList.add('hidden');
   modal.classList.remove('flex');
   document.removeEventListener('keydown', _marcoWsModalKey);
-  // Reset form state.
+
+  // Reset form & all status indicators.
   document.getElementById('marco-ws-form')?.reset();
   marcoWsModeChange('local');
-  const errEl = document.getElementById('ws-error');
-  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
-  const statusEl = document.getElementById('ws-path-status');
-  if (statusEl) { statusEl.textContent = ''; }
+  ['ws-error', 'ws-candidates'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.classList.add('hidden'); el.textContent = ''; }
+  });
+  _wsSetPathStatus('', '');
+  _wsSetNameStatus('', '');
+  _wsSetUrlStatus('', '');
+
+  // Clear live-binding flags so they re-bind on next open.
+  ['ws-path', 'ws-name', 'ws-url'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el._wsBound = false;
+  });
+
+  _wsPreflightOk = false;
+  clearTimeout(_wsPathDebounce);
 }
 
 function _marcoWsModalKey(ev) {
@@ -182,34 +310,102 @@ function marcoWsUpdateCloneDest(url) {
   // Auto-fill the name field if empty.
   const nameInput = document.getElementById('ws-name');
   if (nameInput && !nameInput.value && segment) {
-    nameInput.value = segment.replace(/[^a-zA-Z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const normalized = segment.replace(/[^a-zA-Z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    nameInput.value = normalized;
+    _wsCheckNameConflict(normalized);
+  }
+  // Reset preflight state when URL changes.
+  _wsPreflightOk = false;
+  _wsSetUrlStatus('', '');
+}
+
+async function marcoWsPreflightUrl() {
+  const urlEl = document.getElementById('ws-url');
+  const url = (urlEl?.value || '').trim();
+  if (!url) return;
+  _wsSetUrlStatus('Checking URL…', 'text-slate-400');
+  _wsPreflightOk = false;
+  try {
+    const data = await marcoPost('/api/workspaces/clone/preflight', { url });
+    _wsPreflightOk = true;
+    const branch = data.default_branch ? ` · default branch: ${data.default_branch}` : '';
+    _wsSetUrlStatus(`✓ Reachable${branch}`, 'text-rope');
+    // Suggest branch name if the field is empty and we know the default.
+    if (data.default_branch) {
+      const branchEl = document.getElementById('ws-branch');
+      if (branchEl && !branchEl.value) branchEl.placeholder = data.default_branch;
+    }
+  } catch (e) {
+    _wsSetUrlStatus('✗ ' + e.message, 'text-red-400');
   }
 }
 
 async function marcoValidatePath() {
   const pathInput = document.getElementById('ws-path');
-  const statusEl = document.getElementById('ws-path-status');
   const path = (pathInput?.value || '').trim();
-  if (!path) { statusEl.textContent = '⚠ Enter a path first.'; statusEl.className = 'mt-1 text-xs text-amber-400'; return; }
-  statusEl.textContent = 'Checking…'; statusEl.className = 'mt-1 text-xs text-slate-400';
+  if (!path) { _wsSetPathStatus('⚠ Enter a path first.', 'text-amber-400'); return; }
+  _wsSetPathStatus('Checking…', 'text-slate-400');
   try {
     const data = await marcoPost('/api/validate-path', { path });
     if (data.exists) {
       const git = data.is_git ? ' · git repo detected' : '';
-      statusEl.textContent = `✓ Found${git}`;
-      statusEl.className = 'mt-1 text-xs text-rope';
+      _wsSetPathStatus(`✓ Found${git}`, 'text-rope');
       // Auto-fill name from the last path segment if empty.
       const nameInput = document.getElementById('ws-name');
       if (nameInput && !nameInput.value) {
-        nameInput.value = data.resolved.split('/').filter(Boolean).pop() || '';
+        const seg = data.resolved.split('/').filter(Boolean).pop() || '';
+        nameInput.value = seg;
+        _wsCheckNameConflict(seg);
+        nameInput.focus();
       }
     } else {
-      statusEl.textContent = '✗ Path does not exist or is not a directory.';
-      statusEl.className = 'mt-1 text-xs text-red-400';
+      _wsSetPathStatus('✗ Path does not exist or is not a directory.', 'text-red-400');
     }
   } catch (e) {
-    statusEl.textContent = '✗ ' + e.message;
-    statusEl.className = 'mt-1 text-xs text-red-400';
+    _wsSetPathStatus('✗ ' + e.message, 'text-red-400');
+  }
+}
+
+function _marcoWsToast(msg) {
+  let toast = document.getElementById('marco-ws-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'marco-ws-toast';
+    toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-100 shadow-xl ring-1 ring-slate-700 z-50 transition-opacity duration-500';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+}
+
+async function _marcoWsRefreshSwitcher(newName) {
+  // After adding, activate the new workspace then reload the switcher element
+  // without a full page reload.
+  try {
+    await marcoPost('/api/workspaces/active', { name: newName });
+  } catch (_) { /* non-fatal */ }
+
+  // Re-fetch the workspace list and update the <select> if present.
+  try {
+    const data = await fetch('/api/workspaces').then(r => r.json());
+    const select = document.querySelector('#marco-workspace-switcher select');
+    if (select) {
+      select.innerHTML = data.workspaces.map(ws =>
+        `<option value="${ws.name}"${ws.name === data.active ? ' selected' : ''}>${ws.name}</option>`
+      ).join('');
+    }
+    // Update the path hint below the switcher.
+    const pathHint = document.querySelector('#marco-workspace-switcher p.truncate');
+    if (pathHint) {
+      const active = data.workspaces.find(ws => ws.name === data.active);
+      if (active) { pathHint.textContent = active.path; pathHint.title = active.path; }
+    }
+  } catch (_) {
+    // Fallback: full reload if partial update fails.
+    window.location.reload();
+    return;
   }
 }
 
@@ -217,14 +413,25 @@ async function marcoWorkspaceSubmit(event) {
   if (event) event.preventDefault();
   const errEl = document.getElementById('ws-error');
   const submitBtn = document.getElementById('ws-submit-btn');
-  const hideErr = () => { errEl?.classList.add('hidden'); };
   const showErr = (msg) => {
     if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
   };
+  const hideErr = () => { errEl?.classList.add('hidden'); };
 
   const mode = document.querySelector('input[name="ws-mode"]:checked')?.value || 'local';
   const name = (document.getElementById('ws-name')?.value || '').trim();
   if (!name) { showErr('Workspace name is required.'); return false; }
+
+  // Client-side conflict guard.
+  if (_wsKnownWorkspaces.includes(_wsNormalizeName(name))) {
+    showErr(`Workspace name "${_wsNormalizeName(name)}" is already registered.`);
+    return false;
+  }
+
+  if (mode === 'remote' && !_wsPreflightOk) {
+    showErr('Verify the repository URL first — click the URL field and wait for the check.');
+    return false;
+  }
 
   hideErr();
   submitBtn.disabled = true;
@@ -233,17 +440,21 @@ async function marcoWorkspaceSubmit(event) {
   try {
     if (mode === 'local') {
       const path = (document.getElementById('ws-path')?.value || '').trim();
-      if (!path) { showErr('Path is required.'); return false; }
+      if (!path) { showErr('Path is required.'); submitBtn.disabled = false; submitBtn.textContent = 'Add workspace'; return false; }
       await marcoPost('/api/workspaces', { name, path });
     } else {
       const url = (document.getElementById('ws-url')?.value || '').trim();
       const branch = (document.getElementById('ws-branch')?.value || '').trim();
       const shallow = document.getElementById('ws-shallow')?.checked !== false;
-      if (!url) { showErr('Repository URL is required.'); return false; }
+      if (!url) { showErr('Repository URL is required.'); submitBtn.disabled = false; submitBtn.textContent = 'Add workspace'; return false; }
       await marcoPost('/api/workspaces/clone', { name, url, branch, shallow: String(shallow) });
     }
+
+    // Success path: activate + refresh switcher without full reload.
+    const normalized = _wsNormalizeName(name);
     marcoWorkspaceModalClose();
-    window.location.reload();
+    await _marcoWsRefreshSwitcher(normalized);
+    _marcoWsToast(`Workspace "${normalized}" added & active`);
   } catch (e) {
     showErr(e.message || 'Failed to add workspace.');
     submitBtn.disabled = false;
