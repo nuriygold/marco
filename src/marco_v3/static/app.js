@@ -42,6 +42,137 @@ async function marcoInitAIGates() {
 }
 
 document.addEventListener('DOMContentLoaded', marcoInitAIGates);
+document.addEventListener('DOMContentLoaded', marcoSidebarInit);
+document.addEventListener('DOMContentLoaded', marcoScrollHelpersInit);
+document.addEventListener('DOMContentLoaded', marcoLoadWorkspaceCandidates);
+
+// ---------- Sidebar collapse (desktop icon-rail) ----------
+
+const MARCO_SIDEBAR_KEY = 'marco.sidebar';
+
+function marcoSidebarInit() {
+  const aside = document.getElementById('marco-sidebar');
+  if (!aside) return;
+  if (localStorage.getItem(MARCO_SIDEBAR_KEY) === 'collapsed') {
+    aside.classList.add('is-collapsed');
+    _marcoSidebarSyncAria(aside, true);
+  }
+}
+
+function marcoSidebarToggle() {
+  const aside = document.getElementById('marco-sidebar');
+  if (!aside) return;
+  const nowCollapsed = !aside.classList.contains('is-collapsed');
+  aside.classList.toggle('is-collapsed', nowCollapsed);
+  localStorage.setItem(MARCO_SIDEBAR_KEY, nowCollapsed ? 'collapsed' : 'expanded');
+  _marcoSidebarSyncAria(aside, nowCollapsed);
+}
+
+function _marcoSidebarSyncAria(aside, collapsed) {
+  const btn = aside.querySelector('.marco-sidebar-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-expanded', String(!collapsed));
+  btn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  btn.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+}
+
+// ---------- Console: floating scroll helpers ----------
+
+function marcoScrollHelpersInit() {
+  const transcript = document.getElementById('marco-chat-transcript');
+  if (!transcript) return;  // only runs on /console
+
+  const container = document.createElement('div');
+  container.className = 'marco-scroll-helpers';
+  container.innerHTML = `
+    <button type="button" id="marco-scroll-top"
+            class="rounded-full bg-hull/95 p-2 text-slate-200 shadow-lg ring-1 ring-slate-700 hover:text-white is-hidden"
+            title="Jump to earliest message" aria-label="Jump to earliest message">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+        <polyline points="18 15 12 9 6 15"/>
+      </svg>
+    </button>
+    <button type="button" id="marco-scroll-bottom"
+            class="rounded-full bg-hull/95 p-2 text-slate-200 shadow-lg ring-1 ring-slate-700 hover:text-white is-hidden"
+            title="Jump to most recent message" aria-label="Jump to most recent message">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
+  `;
+  document.body.appendChild(container);
+
+  const topBtn = document.getElementById('marco-scroll-top');
+  const bottomBtn = document.getElementById('marco-scroll-bottom');
+
+  topBtn.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  bottomBtn.addEventListener('click', () => {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  });
+
+  // Show helpers only when there's something to scroll to.
+  const update = () => {
+    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+    const viewport = window.innerHeight;
+    const total = document.documentElement.scrollHeight;
+    const atTop = scrollTop < 80;
+    const atBottom = scrollTop + viewport >= total - 80;
+    const scrollable = total > viewport + 40;
+    topBtn.classList.toggle('is-hidden', !scrollable || atTop);
+    bottomBtn.classList.toggle('is-hidden', !scrollable || atBottom);
+  };
+  update();
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update);
+  // New messages append — re-evaluate.
+  new MutationObserver(update).observe(transcript, { childList: true, subtree: true });
+}
+
+// ---------- Workspace: quick-add candidates ----------
+
+async function marcoLoadWorkspaceCandidates() {
+  const hosts = document.querySelectorAll('.marco-ws-candidates');
+  if (!hosts.length) return;
+  let html = '';
+  try {
+    const res = await fetch('/api/workspaces/candidates');
+    if (!res.ok) { hosts.forEach(h => { h.innerHTML = ''; }); return; }
+    const data = await res.json();
+    if (!data.candidates || !data.candidates.length) {
+      html = '<p class="text-[11px] text-slate-500">No detected repos. Use Advanced below.</p>';
+    } else {
+      html = data.candidates.map(c => `
+        <button type="button"
+                data-name="${escapeHtml(c.name)}" data-path="${escapeHtml(c.path)}"
+                onclick="marcoQuickAddWorkspace(this)"
+                class="flex w-full items-center justify-between gap-2 rounded bg-slate-900 px-2 py-1 text-left text-xs text-slate-200 ring-1 ring-slate-700 hover:bg-slate-800 hover:text-white">
+          <span class="truncate font-mono text-emerald-300">${escapeHtml(c.name)}</span>
+          <span class="truncate text-[10px] text-slate-500" title="${escapeHtml(c.path)}">${escapeHtml(c.path)}</span>
+        </button>
+      `).join('');
+    }
+    hosts.forEach(h => { h.innerHTML = html; });
+  } catch (e) {
+    hosts.forEach(h => { h.innerHTML = ''; });
+  }
+}
+
+async function marcoQuickAddWorkspace(btn) {
+  const name = btn.dataset.name;
+  const path = btn.dataset.path;
+  btn.disabled = true;
+  btn.classList.add('opacity-50');
+  try {
+    await marcoPost('/api/workspaces', { name, path });
+    window.location.reload();
+  } catch (e) {
+    alert('Failed to register: ' + e.message);
+    btn.disabled = false;
+    btn.classList.remove('opacity-50');
+  }
+}
 
 async function marcoAIPlan(event) {
   if (event) event.preventDefault();

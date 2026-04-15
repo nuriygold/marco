@@ -1,4 +1,4 @@
-<div class="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
+<div class="marco-workspace-switcher mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
   <div class="mb-2 text-[11px] uppercase tracking-wider text-slate-500">Workspace</div>
   {% if registry.workspaces %}
     <form hx-post="/api/workspaces/active"
@@ -6,7 +6,7 @@
           hx-trigger="change from:select"
           hx-on::after-request="window.location.reload()"
           hx-swap="none">
-      <select name="name" class="w-full rounded bg-slate-900 px-2 py-1 text-sm text-slate-100 outline-none ring-1 ring-slate-700 focus:ring-emerald-500">
+      <select name="name" class="w-full rounded bg-slate-900 px-2 py-1 text-sm text-slate-100 outline-none ring-1 ring-slate-700 focus:ring-beacon">
         {% for ws in registry.workspaces %}
           <option value="{{ ws.name }}" {% if active and ws.name == active.name %}selected{% endif %}>
             {{ ws.name }}
@@ -21,10 +21,18 @@
     <p class="text-xs text-slate-400">No workspaces yet.</p>
   {% endif %}
 
-  <details class="mt-3">
-    <summary class="cursor-pointer text-[11px] text-slate-400 hover:text-slate-200">Add workspace</summary>
+  <details class="mt-3" open>
+    <summary class="cursor-pointer text-[11px] text-rope hover:text-foam">+ Quick add</summary>
+    <p class="mt-2 text-[10px] text-slate-500">Detected git repos on disk — one click to register.</p>
+    <div class="marco-ws-candidates mt-2 space-y-1">
+      <p class="text-[11px] text-slate-500">Scanning…</p>
+    </div>
+  </details>
+
+  <details class="mt-2">
+    <summary class="cursor-pointer text-[11px] text-slate-400 hover:text-slate-200">Advanced: register by path</summary>
     <form class="mt-2 space-y-2" onsubmit="return marcoAddWorkspace(event)">
-      <input name="name" placeholder="name" required
+      <input name="name" placeholder="nickname" required
              class="w-full rounded bg-slate-900 px-2 py-1 text-xs ring-1 ring-slate-700" />
       <input name="path" placeholder="/absolute/path" required
              class="w-full rounded bg-slate-900 px-2 py-1 text-xs ring-1 ring-slate-700" />

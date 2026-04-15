@@ -294,6 +294,10 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
             request, 'audit.html', _page_context(entries=audit_tail(limit=200))
         )
 
+    @app.get('/help', response_class=HTMLResponse)
+    async def help_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(request, 'help.html', _page_context())
+
     # ---------- API: workspaces ----------
 
     @app.get('/api/workspaces')
@@ -303,6 +307,44 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
             'active': registry.active,
             'workspaces': [asdict(ws) for ws in registry.workspaces],
         }
+
+    @app.get('/api/workspaces/candidates')
+    async def api_workspace_candidates() -> dict[str, Any]:
+        """List git repos under MARCO_WORKSPACE_ROOT (default: ~) not yet registered.
+
+        Read-only; a one-level scan capped at 50 entries. Used by the sidebar's
+        quick-add UI so operators don't have to type absolute paths.
+        """
+        import os
+        from pathlib import Path as _P
+
+        root = _P(os.environ.get('MARCO_WORKSPACE_ROOT', str(_P.home()))).expanduser()
+        registry = load_registry(registry_path)
+        registered_paths = {_P(ws.path).resolve() for ws in registry.workspaces}
+        registered_names = {ws.name for ws in registry.workspaces}
+
+        candidates: list[dict[str, str]] = []
+        if root.exists() and root.is_dir():
+            try:
+                entries = sorted(os.scandir(root), key=lambda e: e.name.lower())
+            except PermissionError:
+                entries = []
+            for entry in entries:
+                if len(candidates) >= 50:
+                    break
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                path = _P(entry.path).resolve()
+                if not (path / '.git').exists():
+                    continue
+                if path in registered_paths:
+                    continue
+                name = entry.name
+                # Skip candidates whose nickname collides with an existing workspace.
+                if name in registered_names:
+                    continue
+                candidates.append({'name': name, 'path': str(path)})
+        return {'root': str(root), 'candidates': candidates}
 
     @app.post('/api/workspaces')
     async def api_add_workspace(payload: dict[str, str]) -> dict[str, Any]:

@@ -8,3 +8,147 @@ pre {
 /* Diff coloring inside patch detail pages. */
 pre .diff-add { color: #6ee7b7; }
 pre .diff-del { color: #fda4af; }
+
+/* ---------- Sidebar: icon-rail collapse ---------- */
+
+/* Collapsed state shrinks the desktop aside to icon width and hides text labels. */
+#marco-sidebar.is-collapsed {
+  width: 4rem;   /* matches Tailwind w-16 */
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+#marco-sidebar.is-collapsed .sidebar-label {
+  display: none;
+}
+#marco-sidebar.is-collapsed nav a {
+  justify-content: center;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+/* Flip the chevron when collapsed. */
+#marco-sidebar.is-collapsed .marco-sidebar-toggle svg {
+  transform: rotate(180deg);
+}
+/* Center the logo when collapsed. */
+#marco-sidebar.is-collapsed > div:first-child {
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ---------- Console: sticky composer ---------- */
+
+.marco-console-composer {
+  position: sticky;
+  bottom: 0;
+  background: rgba(8, 20, 40, 0.92);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid rgb(30 41 59 / 0.8); /* slate-800/80 */
+  z-index: 5;
+}
+
+/* ---------- Console: floating scroll helpers ---------- */
+
+.marco-scroll-helpers {
+  position: fixed;
+  right: 1rem;
+  bottom: 7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 10;
+  pointer-events: none;
+}
+.marco-scroll-helpers button {
+  pointer-events: auto;
+}
+.marco-scroll-helpers button.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+/* ---------- Tour overlay ---------- */
+
+.marco-tour-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 10, 22, 0.55);
+  z-index: 80;
+}
+.marco-tour-highlight {
+  position: fixed;
+  z-index: 81;
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px #38bdf8, 0 0 0 9999px rgba(4, 10, 22, 0.55);
+  pointer-events: none;
+  transition: top 0.2s, left 0.2s, width 0.2s, height 0.2s;
+}
+.marco-tour-card {
+  position: fixed;
+  z-index: 82;
+  width: min(22rem, calc(100vw - 2rem));
+  background: #0b1d3a;
+  color: #e2e8f0;
+  border: 1px solid #1e3a8a;
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.marco-tour-card h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  color: #dbeafe;
+}
+.marco-tour-card .marco-tour-sec {
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.marco-tour-card .marco-tour-sec strong {
+  display: block;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  color: #c9a87c;
+  margin-bottom: 0.15rem;
+}
+.marco-tour-card .marco-tour-controls {
+  margin-top: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+.marco-tour-card button {
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+}
+.marco-tour-card .marco-tour-primary {
+  background: #c9a87c;
+  color: #0b1d3a;
+  font-weight: 600;
+}
+.marco-tour-card .marco-tour-primary:hover { background: #e0c294; }
+.marco-tour-card .marco-tour-secondary {
+  background: #1e293b;
+  color: #cbd5e1;
+}
+.marco-tour-card .marco-tour-secondary:hover { background: #334155; }
+.marco-tour-card .marco-tour-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 1rem;
+  padding: 0.1rem 0.35rem;
+}
+.marco-tour-card .marco-tour-close:hover { color: #f1f5f9; }
+.marco-tour-step-count {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
