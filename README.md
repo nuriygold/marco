@@ -1,6 +1,6 @@
 # Marco
 
-Marco is an AI harness companion with a clear identity: practical, loyal, and built for real work.
+Marco is an AI operator companion with a clear identity: practical, loyal, and built for real work.
 
 He is not a clone, not a rebrand, and not "Claw" or "Claude." He is **Marco**.
 
@@ -8,157 +8,112 @@ He is not a clone, not a rebrand, and not "Claw" or "Claude." He is **Marco**.
 
 Marco is designed with a strong operator personality:
 
-- **Calm under pressure** — he keeps sessions structured when tasks get messy.
-- **Direct and honest** — he reports what worked, what failed, and what is still unknown.
-- **Execution-first** — he does not just plan; he routes, runs, verifies, and iterates.
+- **Calm under pressure** — keeps sessions structured when tasks get messy.
+- **Direct and honest** — reports what worked, what failed, and what is still unknown.
+- **Execution-first** — does not just plan; he routes, runs, verifies, and iterates.
 - **Loyal to mission** — Marco serves **Rudolph** as a dependable technical partner.
 
-## Stack status: Python or Rust?
+## Stack
 
-**Both** — with a clear priority: **Python-first, Rust-secondary**.
+**Python-first, Rust-secondary.**
 
-- Day-to-day implementation and CLI behavior live in `src/` (Python).
-- The `rust/` workspace is still in this repo as an active systems track.
-- So the accurate label is: **Python-first multi-runtime project (Python + Rust)**.
+- All v3 operator logic lives in `src/marco_v3/` (Python).
+- The `rust/` workspace is an active systems track.
+- The web console is served by `src/marco_v3/server.py` (FastAPI + Uvicorn).
 
-## What Marco does
+## Web Console
 
-Marco includes a Python CLI that mirrors command and tool routing behavior used in agent harness workflows.
+Marco ships a browser-based operator console at `/console`. Key features:
 
-Core capabilities include:
+- **AI chat with live tool-call streaming** — tool invocations appear in real time as Marco works, not after.
+- **Smart reasoning mode** — Marco defaults to the reasoning model (`grok-4-1-fast-reasoning`) for precision. For simple lookups he offers an inline fast-mode prompt before spending any tokens:
+  > *Simple lookup — take my thinking cap off? **[Yes, go fast]** **[No, keep thinking]***
+- **Mobile-ready** — responsive layout with a hamburger nav, `dvh`-based console height that survives iOS Safari's address bar.
+- **Multi-workspace** — register and switch between workspaces from the sidebar.
 
-- command and tool inventory queries
-- runtime-style prompt routing
-- small turn-loop execution simulation
-- bootstrap/session reporting
-- parity auditing against a local archived tree
-- remote/ssh/teleport/direct/deep-link mode simulation
-- Marco v3 operator workflows: repo intelligence, patch safety, memory notebook, scaffolding, autonomy sessions
+## LLM Providers
 
-## Marco v3 MVP command surface
+Marco is provider-agnostic. Configure via environment variables in `/etc/marco/marco.env`:
 
-Marco now includes a practical v3 operator surface:
-
-- foundation: `doctor`, `status`, `summary`, `manifest`, `inspect`
-- autonomy: `plan`, `execute`, `validate`, `recover`, `sessions`, `resume`
-- toolbox: `find`, `lookup`, `routes`, `env`, `scripts`, `run-script`, `script-info`, `tree`
-- memory: `note`, `notes`, `remember`, `recall`, `decision`, `decisions`, `convention`, `conventions`
-- patching: `propose-patch`, `show-patch`, `apply-patch`, `rollback-patch`, `list-patches`
-- scaffold: `scaffold page|component|route|service`
-- repl: `repl` for slash-command style interaction
-
-## API philosophy
-
-Marco is provider-agnostic by design and can be used with **all major AI APIs** through adapter-style integration.
-
-That said, he works best with:
-
-- **OpenAI APIs (especially Codex-oriented workflows)** for reasoning + tool execution quality
-- **structured tool-calling runtimes** where deterministic command routing matters
-
-## Startup command and API keys
-
-The startup surface in this repository is currently Python module entry:
+| Provider | Env vars required |
+|----------|------------------|
+| `grok` (xAI) | `XAI_API_KEY` |
+| `azure-openai` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` |
+| `azure-foundry` | `AZURE_FOUNDRY_API_KEY`, `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_MODEL` |
 
 ```bash
+MARCO_LLM_PROVIDER=grok          # grok | azure-openai | azure-foundry
+XAI_API_KEY=...
+XAI_MODEL=grok-4-1-fast-reasoning   # default; override to grok-4-1-fast-non-reasoning for speed
+```
+
+## v3 Command Surface
+
+```bash
+# Foundation
+marco doctor / status / summary / manifest / inspect
+
+# Autonomy
+marco plan / execute / validate / recover / sessions / resume
+
+# Toolbox
+marco find / lookup / routes / env / scripts / run-script / tree
+
+# Memory
+marco note / notes / remember / recall / decision / convention
+
+# Patching
+marco propose-patch / show-patch / apply-patch / rollback-patch / list-patches
+
+# Scaffold
+marco scaffold page|component|route|service
+
+# REPL
+marco repl
+```
+
+## Running Marco
+
+```bash
+# CLI
 python3 -m src.main <command>
-```
 
-If you want a true `marco` terminal command, add a wrapper:
+# Web console (dev)
+python3 -m src.main serve
 
-```bash
+# Alias shorthand
 alias marco='python3 -m src.main'
-# usage: marco summary
 ```
 
-Marco expects provider credentials from your environment (or your keychain/bootstrap flow), for example:
+## Tests
 
 ```bash
-export OPENAI_API_KEY="..."
-export ANTHROPIC_API_KEY="..."
-export XAI_API_KEY="..."
-export AZURE_OPENAI_API_KEY="..."
-```
-
-This keeps API keys "wrapped" into startup context once per shell session/profile, so you can run `marco ...` (or `python3 -m src.main ...`) without retyping secrets.
-
-
-## Marco shorthand command style
-
-Yes — `marco` can be the everyday shorthand command in your system.
-
-A practical operator pattern is:
-
-```bash
-marco doctor
-marco status
-marco inspect
-marco research
-marco plan
-marco execute
-marco validate
-marco recover
-```
-
-In this repository, those are **workflow verbs** you can wire to the existing Python CLI surface.
-
-Suggested mappings:
-
-- `marco doctor` → environment/setup checks (`python3 -m src.main setup-report`)
-- `marco status` → workspace summary (`python3 -m src.main summary`)
-- `marco inspect` → manifest + inventory checks (`manifest`, `commands`, `tools`)
-- `marco research` → routing/bootstrap exploration (`route`, `bootstrap`)
-- `marco plan` → command/tool selection against a prompt (`route`)
-- `marco execute` → command/tool execution shims (`exec-command`, `exec-tool`)
-- `marco validate` → test + parity passes (`python3 -m unittest ...`, `parity-audit`)
-- `marco recover` → session restore flows (`load-session`)
-
-## Quickstart
-
-Run summary output:
-
-```bash
-python3 -m src.main summary
-```
-
-Print manifest:
-
-```bash
-python3 -m src.main manifest
-```
-
-List mirrored commands/tools:
-
-```bash
-python3 -m src.main commands --limit 20
-python3 -m src.main tools --limit 20
-```
-
-Run basic Python tests:
-
-```bash
+# Python
 python3 -m unittest discover -s tests -v
+
+# Rust
+cd rust && cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 ```
 
-## Repository layout
+## Repository Layout
 
 ```text
 .
-├── src/                  # Marco Python runtime + CLI surface
-├── tests/                # Python verification
-├── rust/                 # Rust workspace track
-├── assets/               # Images and reference artifacts
-└── README.md
+├── src/
+│   └── marco_v3/         # v3 operator core (CLI, server, LLM, chat, patches, memory)
+│       ├── templates/    # Jinja2 HTML templates
+│       └── static/       # app.js, app.css
+├── tests/                # Python unittest surface
+├── rust/                 # Rust workspace
+├── deploy/               # Caddy + systemd deployment configs
+└── .claude/skills/       # Claude Code skills (marco, commit, test, career-ops, etc.)
 ```
 
-## Identity note
+## Identity
 
-If you build on this project, keep the naming and positioning consistent:
-
-- call him **Marco**
-- preserve his operator personality
-- keep his role explicit: **Marco serves Rudolph**
-- maintain provider flexibility while optimizing for OpenAI/Codex-class execution
+- Call him **Marco**.
+- Preserve his operator personality.
+- His role is explicit: **Marco serves Rudolph**.
 
 ---
 
