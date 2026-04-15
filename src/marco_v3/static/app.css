@@ -11,6 +11,10 @@ pre .diff-del { color: #fda4af; }
 
 /* ---------- Sidebar: icon-rail collapse ---------- */
 
+.marco-sidebar-anim {
+  transition: width 0.2s ease, padding 0.2s ease;
+}
+
 /* Collapsed state shrinks the desktop aside to icon width and hides text labels. */
 #marco-sidebar.is-collapsed {
   width: 4rem;   /* matches Tailwind w-16 */
@@ -58,14 +62,32 @@ pre .diff-del { color: #fda4af; }
   z-index: 10;
   pointer-events: none;
 }
-.marco-scroll-helpers button {
+
+/* Pill-shaped labelled button (icon + text) */
+.marco-scroll-btn {
   pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 9999px;
+  background: rgba(11, 29, 58, 0.95);
+  color: #cbd5e1;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  outline: 1px solid rgb(51 65 85);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
-.marco-scroll-helpers button.is-hidden {
+.marco-scroll-btn:hover {
+  color: #fff;
+  background: rgba(30, 58, 92, 0.97);
+}
+.marco-scroll-btn.is-hidden {
   opacity: 0;
   pointer-events: none;
   transform: translateY(4px);
-  transition: opacity 0.15s, transform 0.15s;
 }
 
 /* ---------- Tour overlay ---------- */

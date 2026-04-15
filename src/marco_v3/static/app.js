@@ -85,18 +85,20 @@ function marcoScrollHelpersInit() {
   container.className = 'marco-scroll-helpers';
   container.innerHTML = `
     <button type="button" id="marco-scroll-top"
-            class="rounded-full bg-hull/95 p-2 text-slate-200 shadow-lg ring-1 ring-slate-700 hover:text-white is-hidden"
-            title="Jump to earliest message" aria-label="Jump to earliest message">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+            class="marco-scroll-btn is-hidden"
+            title="Go to beginning of thread" aria-label="Go to beginning of thread">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 shrink-0">
         <polyline points="18 15 12 9 6 15"/>
       </svg>
+      <span>Oldest</span>
     </button>
     <button type="button" id="marco-scroll-bottom"
-            class="rounded-full bg-hull/95 p-2 text-slate-200 shadow-lg ring-1 ring-slate-700 hover:text-white is-hidden"
-            title="Jump to most recent message" aria-label="Jump to most recent message">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+            class="marco-scroll-btn is-hidden"
+            title="Go to most recent response" aria-label="Go to most recent response">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 shrink-0">
         <polyline points="6 9 12 15 18 9"/>
       </svg>
+      <span>Newest</span>
     </button>
   `;
   document.body.appendChild(container);
