@@ -217,5 +217,136 @@ class CloneWorkspaceTests(UiShellTestBase):
             remove_workspace('marco-test-clone-deleteme')
 
 
+class AddWorkspaceLoopTests(UiShellTestBase):
+    """End-to-end exercise of the modal + new preflight + full add-workspace loop.
+
+    Simulates every step the browser performs when a user adds a workspace:
+    render the modal, fetch candidates, validate a path, preflight a remote URL,
+    POST the workspace, and activate it. This catches drift between the server
+    wiring and the client assumptions encoded in app.js.
+    """
+
+    def test_modal_markup_exposes_required_hooks(self) -> None:
+        """The rendered page must contain every DOM id app.js reaches for."""
+        res = self.client.get('/', headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        body = res.text
+        for hook in [
+            'marco-workspace-modal',   # outer modal
+            'ws-candidates',           # quick-pick slot (new)
+            'ws-path',                 # local path input
+            'ws-path-status',          # live validation feedback
+            'ws-name',                 # workspace nickname input
+            'ws-name-status',          # normalization preview (new)
+            'ws-url',                  # remote URL input
+            'ws-url-status',           # preflight feedback (new)
+            'ws-submit-btn',           # submit button
+        ]:
+            self.assertIn(hook, body, f'Modal is missing required hook: {hook}')
+
+    def test_full_local_add_loop(self) -> None:
+        """Simulate the browser flow: candidates → validate → add → activate."""
+        scan_root = Path(self.tmp.name) / 'scan'
+        scan_root.mkdir()
+        fresh = scan_root / 'fresh'
+        fresh.mkdir()
+        (fresh / '.git').mkdir()
+
+        # 1. Modal opens and fetches candidates.
+        with mock.patch.dict(os.environ, {'MARCO_WORKSPACE_ROOT': str(scan_root)}):
+            res = self.client.get('/api/workspaces/candidates', headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        candidates = res.json()['candidates']
+        self.assertTrue(any(c['name'] == 'fresh' for c in candidates))
+        fresh_path = next(c['path'] for c in candidates if c['name'] == 'fresh')
+
+        # 2. User clicks the candidate; client debounce fires validate-path.
+        res = self.client.post(
+            '/api/validate-path', json={'path': fresh_path}, headers=self.headers
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()['exists'])
+        self.assertTrue(res.json()['is_git'])
+
+        # 3. User submits — register the workspace.
+        res = self.client.post(
+            '/api/workspaces',
+            json={'name': 'fresh', 'path': fresh_path},
+            headers=self.headers,
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()['name'], 'fresh')
+
+        # 4. Client auto-activates the new workspace (replaces full page reload).
+        res = self.client.post(
+            '/api/workspaces/active', json={'name': 'fresh'}, headers=self.headers
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # 5. Switcher refresh fetches the updated list and active name.
+        res = self.client.get('/api/workspaces', headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data['active'], 'fresh')
+        self.assertIn('fresh', [ws['name'] for ws in data['workspaces']])
+
+    def test_full_remote_clone_loop_uses_preflight(self) -> None:
+        """Remote-mode flow: preflight → clone → activate, all mocked at subprocess."""
+        import subprocess as _sp
+
+        clone_dest = Path.home() / '.marco' / 'clones' / 'ui-loop-clone-deleteme'
+
+        def fake_run(cmd, **kwargs):
+            if 'ls-remote' in cmd:
+                # Preflight path: return a symref so default_branch is parsed.
+                return _sp.CompletedProcess(
+                    cmd, returncode=0,
+                    stdout='ref: refs/heads/trunk\tHEAD\ndeadbeef\tHEAD\n',
+                    stderr='',
+                )
+            # Clone path: create the dest so add_workspace's existence check passes.
+            clone_dest.mkdir(parents=True, exist_ok=True)
+            (clone_dest / '.git').mkdir(exist_ok=True)
+            return _sp.CompletedProcess(cmd, returncode=0, stdout='', stderr='')
+
+        try:
+            with mock.patch('subprocess.run', side_effect=fake_run):
+                # 1. Preflight surfaces reachability + default branch.
+                res = self.client.post(
+                    '/api/workspaces/clone/preflight',
+                    json={'url': 'https://github.com/user/repo.git'},
+                    headers=self.headers,
+                )
+                self.assertEqual(res.status_code, 200, res.text)
+                self.assertEqual(res.json()['default_branch'], 'trunk')
+
+                # 2. Full clone after preflight passes.
+                res = self.client.post(
+                    '/api/workspaces/clone',
+                    json={
+                        'url': 'https://github.com/user/repo.git',
+                        'name': 'ui-loop-clone-deleteme',
+                    },
+                    headers=self.headers,
+                )
+                self.assertEqual(res.status_code, 200, res.text)
+                self.assertEqual(res.json()['name'], 'ui-loop-clone-deleteme')
+
+                # 3. Auto-activate + switcher refresh round trip.
+                self.client.post(
+                    '/api/workspaces/active',
+                    json={'name': 'ui-loop-clone-deleteme'},
+                    headers=self.headers,
+                )
+                res = self.client.get('/api/workspaces', headers=self.headers)
+                self.assertEqual(res.json()['active'], 'ui-loop-clone-deleteme')
+        finally:
+            import shutil
+            if clone_dest.exists():
+                shutil.rmtree(clone_dest, ignore_errors=True)
+            from src.marco_v3.server_workspaces import remove_workspace
+            remove_workspace('ui-loop-clone-deleteme', registry_path=self.registry)
+
+
 if __name__ == '__main__':
     unittest.main()

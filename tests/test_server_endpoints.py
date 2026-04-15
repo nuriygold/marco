@@ -147,5 +147,127 @@ class WorkspaceEndpointsTests(ServerTestBase):
         self.assertEqual(res.status_code, 400)
 
 
+class WorkspacePreflightTests(ServerTestBase):
+    """Tests for POST /api/workspaces/clone/preflight."""
+
+    def test_preflight_rejected_non_https_host(self) -> None:
+        res = self.client.post(
+            '/api/workspaces/clone/preflight',
+            json={'url': 'https://evil.example.com/repo.git'},
+            headers=self.headers,
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('GitHub', res.json()['detail'])
+
+    def test_preflight_missing_url(self) -> None:
+        res = self.client.post(
+            '/api/workspaces/clone/preflight',
+            json={},
+            headers=self.headers,
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_preflight_success(self) -> None:
+        """Mocks subprocess so git ls-remote appears to succeed."""
+        completed = mock.MagicMock()
+        completed.returncode = 0
+        completed.stdout = 'ref: refs/heads/main\tHEAD\nabc123\tHEAD\n'
+        completed.stderr = ''
+
+        with mock.patch('subprocess.run', return_value=completed):
+            res = self.client.post(
+                '/api/workspaces/clone/preflight',
+                json={'url': 'https://github.com/user/repo.git'},
+                headers=self.headers,
+            )
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertTrue(body['ok'])
+        self.assertEqual(body['default_branch'], 'main')
+
+    def test_preflight_unreachable_repo(self) -> None:
+        """git ls-remote exits non-zero → 422."""
+        completed = mock.MagicMock()
+        completed.returncode = 128
+        completed.stdout = ''
+        completed.stderr = 'ERROR: Repository not found.'
+
+        with mock.patch('subprocess.run', return_value=completed):
+            res = self.client.post(
+                '/api/workspaces/clone/preflight',
+                json={'url': 'https://github.com/nobody/nonexistent.git'},
+                headers=self.headers,
+            )
+        self.assertEqual(res.status_code, 422)
+        self.assertIn('Cannot reach', res.json()['detail'])
+
+    def test_preflight_timeout(self) -> None:
+        """git ls-remote times out → 504."""
+        import subprocess
+
+        with mock.patch('subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=10)):
+            res = self.client.post(
+                '/api/workspaces/clone/preflight',
+                json={'url': 'https://github.com/user/slow.git'},
+                headers=self.headers,
+            )
+        self.assertEqual(res.status_code, 504)
+
+
+class WorkspaceCloneCleanupTests(ServerTestBase):
+    """Tests that clone failure leaves no partial directory behind."""
+
+    def test_clone_failure_cleans_up_dest(self) -> None:
+        """When git clone returns non-zero the dest directory is removed."""
+        import subprocess
+
+        completed = mock.MagicMock()
+        completed.returncode = 1
+        completed.stdout = ''
+        completed.stderr = 'fatal: repository not found'
+
+        # Track rmtree calls to verify cleanup happens.
+        original_rmtree = __import__('shutil').rmtree
+        rmtree_calls: list[str] = []
+
+        def _spy_rmtree(path, **kwargs):
+            rmtree_calls.append(str(path))
+            original_rmtree(path, **kwargs)
+
+        with mock.patch('subprocess.run', return_value=completed), \
+             mock.patch('shutil.rmtree', side_effect=_spy_rmtree):
+            res = self.client.post(
+                '/api/workspaces/clone',
+                json={'name': 'myclone', 'url': 'https://github.com/user/repo.git'},
+                headers=self.headers,
+            )
+
+        self.assertEqual(res.status_code, 422)
+        # rmtree must have been called (cleanup of partial dest).
+        self.assertTrue(any('myclone' in p for p in rmtree_calls))
+
+    def test_clone_timeout_cleans_up_dest(self) -> None:
+        """When git clone times out the dest directory is also cleaned up."""
+        import subprocess
+
+        rmtree_calls: list[str] = []
+        original_rmtree = __import__('shutil').rmtree
+
+        def _spy_rmtree(path, **kwargs):
+            rmtree_calls.append(str(path))
+            # Don't actually call original since dest was never created.
+
+        with mock.patch('subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=120)), \
+             mock.patch('shutil.rmtree', side_effect=_spy_rmtree):
+            res = self.client.post(
+                '/api/workspaces/clone',
+                json={'name': 'slowclone', 'url': 'https://github.com/user/repo.git'},
+                headers=self.headers,
+            )
+
+        self.assertEqual(res.status_code, 504)
+        self.assertTrue(any('slowclone' in p for p in rmtree_calls))
+
+
 if __name__ == '__main__':
     unittest.main()

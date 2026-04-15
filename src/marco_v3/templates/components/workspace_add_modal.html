@@ -34,6 +34,11 @@
 
       <!-- Local path fields -->
       <div id="ws-local-fields" class="space-y-3">
+        <!-- Quick-pick: unregistered git repos discovered automatically -->
+        <div id="ws-candidates" class="hidden">
+          <p class="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Quick pick</p>
+          <div id="ws-candidates-list" class="flex flex-wrap gap-1"></div>
+        </div>
         <div>
           <label for="ws-path" class="mb-1 block text-xs text-slate-400">Absolute path</label>
           <div class="flex gap-2">
@@ -62,6 +67,7 @@
             Clones to: <code id="ws-clone-dest-hint" class="text-slate-300">~/.marco/clones/&lt;name&gt;</code>
           </p>
         </div>
+        <div id="ws-url-status" class="mt-1 text-xs"></div>
         <div class="flex gap-3">
           <div class="flex-1">
             <label for="ws-branch" class="mb-1 block text-xs text-slate-400">Branch (optional)</label>
@@ -82,7 +88,10 @@
                placeholder="my-repo"
                maxlength="50"
                class="w-full rounded bg-slate-900 px-3 py-2 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-beacon" />
-        <p class="mt-1 text-[10px] text-slate-500">Short unique identifier (letters, numbers, hyphens).</p>
+        <div class="mt-1 flex gap-2 text-[10px]">
+          <span class="text-slate-500">Short unique identifier (letters, numbers, hyphens).</span>
+          <span id="ws-name-status" class="ml-auto"></span>
+        </div>
       </div>
 
       <!-- Error banner -->
