@@ -6,6 +6,9 @@
 marco.example.com {
     encode zstd gzip
 
+    # Block all external framing — Marco is standalone.
+    header Content-Security-Policy "frame-ancestors 'self'"
+
     # Long-lived SSE connections need a generous timeout.
     reverse_proxy 127.0.0.1:8765 {
         transport http {
