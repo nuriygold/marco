@@ -350,7 +350,7 @@ async function _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, send
           bodyEl.textContent = 'Error: ' + err.message;
           bodyEl.className += ' text-red-400';
         }
-        transcript.scrollTop = transcript.scrollHeight;
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
       }
     }
   } catch (e) {
@@ -378,7 +378,7 @@ async function marcoChatSend(event) {
 
   // Echo user message immediately.
   transcript.appendChild(marcoChatRenderMessage({ role: 'user', content: message }));
-  transcript.scrollTop = transcript.scrollHeight;
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
   input.value = '';
 
   // Create the assistant bubble once — _marcoChatStream fills it in.
@@ -397,7 +397,7 @@ async function marcoChatSend(event) {
   assistantBubble.append(roleLabel, bodyEl, toolsEl);
   assistantWrap.appendChild(assistantBubble);
   transcript.appendChild(assistantWrap);
-  transcript.scrollTop = transcript.scrollHeight;
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 
   await _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, sendBtn, input, {});
   return false;
