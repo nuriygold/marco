@@ -197,7 +197,7 @@ async function marcoValidatePath() {
     if (data.exists) {
       const git = data.is_git ? ' · git repo detected' : '';
       statusEl.textContent = `✓ Found${git}`;
-      statusEl.className = 'mt-1 text-xs text-emerald-400';
+      statusEl.className = 'mt-1 text-xs text-rope';
       // Auto-fill name from the last path segment if empty.
       const nameInput = document.getElementById('ws-name');
       if (nameInput && !nameInput.value) {
@@ -315,7 +315,7 @@ function marcoChatRenderMessage(msg) {
 
   const bubble = document.createElement('div');
   bubble.className = 'max-w-[85%] rounded-lg px-3 py-2 text-sm ' + (
-    msg.role === 'user' ? 'bg-emerald-500/15 text-emerald-100' :
+    msg.role === 'user' ? 'bg-rope/15 text-foam' :
     msg.role === 'assistant' ? 'bg-slate-800 text-slate-100' :
     'bg-amber-500/10 text-amber-200 text-xs'
   );
@@ -337,7 +337,7 @@ function marcoChatRenderMessage(msg) {
       const d = document.createElement('details');
       d.className = 'rounded bg-slate-950/60 p-2 text-xs';
       const s = document.createElement('summary');
-      s.className = 'cursor-pointer font-mono text-violet-300';
+      s.className = 'cursor-pointer font-mono text-beacon';
       s.textContent = '🔧 ' + t.name;
       d.appendChild(s);
       const pre = document.createElement('pre');
@@ -398,7 +398,7 @@ async function _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, send
           bodyEl.className = 'text-sm text-slate-300';
           bodyEl.innerHTML =
             'Simple lookup — take my thinking cap off? ' +
-            '<button class="ml-2 rounded bg-violet-500/30 px-2 py-1 text-xs text-violet-100 hover:bg-violet-500/50 focus:outline-none">Yes, go fast</button>' +
+            '<button class="ml-2 rounded bg-beacon/30 px-2 py-1 text-xs text-foam hover:bg-beacon/50 focus:outline-none">Yes, go fast</button>' +
             '<button class="ml-1 rounded bg-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-600 focus:outline-none">No, keep thinking</button>';
           const [yesBtn, noBtn] = bodyEl.querySelectorAll('button');
           yesBtn.onclick = () => _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, sendBtn, input, { lite: true });
@@ -413,7 +413,7 @@ async function _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, send
           const d = document.createElement('details');
           d.className = 'rounded bg-slate-950/60 p-2 text-xs';
           const s = document.createElement('summary');
-          s.className = 'cursor-pointer font-mono text-violet-300';
+          s.className = 'cursor-pointer font-mono text-beacon';
           s.textContent = '🔧 ' + t.name;
           d.appendChild(s);
           const pre = document.createElement('pre');
@@ -429,7 +429,7 @@ async function _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, send
             const d = document.createElement('details');
             d.className = 'rounded bg-slate-950/60 p-2 text-xs';
             const s = document.createElement('summary');
-            s.className = 'cursor-pointer font-mono text-violet-300';
+            s.className = 'cursor-pointer font-mono text-beacon';
             s.textContent = '🔧 ' + t.name;
             d.appendChild(s);
             const pre = document.createElement('pre');
@@ -589,7 +589,7 @@ async function marcoRecall(event) {
     out.innerHTML = data.matches.map(m => `
       <li class="rounded bg-slate-950 p-2">
         <div class="flex justify-between text-xs">
-          <span class="font-mono text-emerald-300">${escapeHtml(m.key)}</span>
+          <span class="font-mono text-rope">${escapeHtml(m.key)}</span>
           <span class="text-slate-500">${escapeHtml(m.kind)} · ${escapeHtml(m.topic)}</span>
         </div>
         <p class="mt-1 text-xs text-slate-300">${escapeHtml(m.text)}</p>

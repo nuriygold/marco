@@ -4,20 +4,20 @@
 {% block subheading %}Propose, inspect, apply with typed confirmation, and rollback.{% endblock %}
 
 {% block content %}
-<section class="mb-6 rounded-lg border border-violet-500/40 bg-violet-500/5 p-4">
-  <h2 class="mb-2 text-sm font-semibold text-violet-200">✨ AI patch suggestion</h2>
-  <p class="mb-3 text-xs text-violet-100/80">
+<section class="mb-6 rounded-lg border border-beacon/40 bg-beacon/5 p-4">
+  <h2 class="mb-2 text-sm font-semibold text-foam">✨ AI patch suggestion</h2>
+  <p class="mb-3 text-xs text-foam/80">
     Describe the change you want in plain English. Marco will read the target file and
     stage a patch proposal for you to review, type-confirm, and apply.
   </p>
   <form onsubmit="return marcoAIPatchSuggest(event)" class="grid gap-3 md:grid-cols-2" id="marco-ai-patch-form">
     <input name="target" placeholder="target file (relative to workspace)" required
-           class="rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-violet-500/40 md:col-span-2" />
+           class="rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-beacon/40 md:col-span-2" />
     <textarea name="description" placeholder='what should change? e.g. "rename function foo to bar in src/utils.py"' required rows="2"
-              class="rounded bg-slate-950 px-3 py-1.5 text-xs ring-1 ring-violet-500/40 md:col-span-2"></textarea>
+              class="rounded bg-slate-950 px-3 py-1.5 text-xs ring-1 ring-beacon/40 md:col-span-2"></textarea>
     <button type="submit" id="marco-ai-patch-btn"
             data-ai-gated="true"
-            class="rounded bg-violet-500/30 px-3 py-2 text-sm text-violet-100 hover:bg-violet-500/50 disabled:opacity-40 disabled:cursor-not-allowed md:col-span-2">
+            class="rounded bg-beacon/30 px-3 py-2 text-sm text-foam hover:bg-beacon/50 disabled:opacity-40 disabled:cursor-not-allowed md:col-span-2">
       ✨ Suggest + stage patch
     </button>
   </form>
@@ -37,7 +37,7 @@
               class="rounded bg-slate-950 px-3 py-1.5 font-mono text-xs ring-1 ring-slate-700 md:col-span-2"></textarea>
     <textarea name="replace" placeholder="replacement text" required rows="3"
               class="rounded bg-slate-950 px-3 py-1.5 font-mono text-xs ring-1 ring-slate-700 md:col-span-2"></textarea>
-    <button class="rounded bg-emerald-500/20 px-3 py-2 text-sm text-emerald-300 hover:bg-emerald-500/30 md:col-span-2">
+    <button class="rounded bg-rope/20 px-3 py-2 text-sm text-rope hover:bg-rope/30 md:col-span-2">
       Propose patch
     </button>
   </form>
@@ -50,7 +50,7 @@
       {% for p in patches %}
         <li class="flex items-center justify-between py-3">
           <div class="min-w-0">
-            <a href="/patches/{{ p.patch_id }}" class="block truncate font-medium text-emerald-300 hover:underline">
+            <a href="/patches/{{ p.patch_id }}" class="block truncate font-medium text-rope hover:underline">
               {{ p.name }}
             </a>
             <div class="mt-0.5 text-[11px] text-slate-500">
@@ -61,7 +61,7 @@
           </div>
           <span class="rounded
             {% if p.status == 'pending' %}bg-amber-500/10 text-amber-300
-            {% elif p.status == 'applied' %}bg-emerald-500/10 text-emerald-300
+            {% elif p.status == 'applied' %}bg-rope/10 text-rope
             {% else %}bg-slate-700 text-slate-300{% endif %}
             px-2 py-1 text-[11px]">{{ p.status }}</span>
         </li>

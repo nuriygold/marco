@@ -9,8 +9,8 @@
     <h2 class="mb-3 text-sm font-semibold">Where is this?</h2>
     <form onsubmit="return marcoLookup(event, 'where')" class="flex gap-2">
       <input name="q" placeholder="keyword (e.g. 'auth', 'router')"
-             class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-emerald-500" />
-      <button class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Lookup</button>
+             class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-rope" />
+      <button class="rounded bg-rope/20 px-3 py-1.5 text-sm text-rope hover:bg-rope/30">Lookup</button>
     </form>
     <pre id="marco-where-output" class="mt-3 max-h-64 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-300"></pre>
   </div>
@@ -19,8 +19,8 @@
     <h2 class="mb-3 text-sm font-semibold">Find files</h2>
     <form onsubmit="return marcoFind(event)" class="flex gap-2">
       <input name="pattern" placeholder='glob e.g. "**/*.py"'
-             class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-emerald-500" />
-      <button class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Find</button>
+             class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-rope" />
+      <button class="rounded bg-rope/20 px-3 py-1.5 text-sm text-rope hover:bg-rope/30">Find</button>
     </form>
     <pre id="marco-find-output" class="mt-3 max-h-64 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-300"></pre>
   </div>
@@ -33,7 +33,7 @@
       <ul class="space-y-1 text-sm">
         {% for s in scripts %}
           <li>
-            <a href="/scripts" class="text-emerald-300 hover:underline font-mono">{{ s.name }}</a>
+            <a href="/scripts" class="text-rope hover:underline font-mono">{{ s.name }}</a>
             <span class="text-xs text-slate-500">({{ s.source }})</span>
           </li>
         {% endfor %}
