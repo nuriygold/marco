@@ -8,8 +8,8 @@
   <h2 class="mb-3 text-sm font-semibold">Recall</h2>
   <form onsubmit="return marcoRecall(event)" class="flex gap-2">
     <input name="q" placeholder="query across notes / decisions / conventions"
-           class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-emerald-500" />
-    <button class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30">Recall</button>
+           class="flex-1 rounded bg-slate-950 px-3 py-1.5 text-sm ring-1 ring-slate-700 focus:outline-none focus:ring-rope" />
+    <button class="rounded bg-rope/20 px-3 py-1.5 text-sm text-rope hover:bg-rope/30">Recall</button>
   </form>
   <ul id="marco-recall-output" class="mt-3 space-y-2 text-sm"></ul>
 </section>
@@ -28,7 +28,7 @@
                class="w-full rounded bg-slate-950 px-2 py-1 text-xs ring-1 ring-slate-700" />
         <textarea name="text" placeholder="details" required rows="2"
                   class="w-full rounded bg-slate-950 px-2 py-1 text-xs ring-1 ring-slate-700"></textarea>
-        <button class="w-full rounded bg-emerald-500/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/30">
+        <button class="w-full rounded bg-rope/20 px-2 py-1 text-xs text-rope hover:bg-rope/30">
           Save {{ kind }}
         </button>
       </form>
@@ -36,7 +36,7 @@
         {% for e in entries|reverse %}
           <li class="rounded bg-slate-950 p-2">
             <div class="flex justify-between">
-              <span class="font-mono text-emerald-300">{{ e.key }}</span>
+              <span class="font-mono text-rope">{{ e.key }}</span>
               <span class="text-[10px] text-slate-500">{{ e.topic }}</span>
             </div>
             <p class="mt-1 text-xs text-slate-300">{{ e.text }}</p>

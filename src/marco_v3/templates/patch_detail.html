@@ -10,7 +10,7 @@
     <span>Created: {{ patch.created_at[:19] }}</span>
     {% if patch.applied_at %}<span>Applied: {{ patch.applied_at[:19] }}</span>{% endif %}
     {% if patch.rollback_at %}<span>Rolled back: {{ patch.rollback_at[:19] }}</span>{% endif %}
-    <a href="/audit" class="ml-auto text-emerald-400 hover:underline">View in audit log →</a>
+    <a href="/audit" class="ml-auto text-rope hover:underline">View in audit log →</a>
   </div>
 </section>
 
@@ -38,13 +38,13 @@
   </form>
 </section>
 {% elif patch.status == 'applied' %}
-<section class="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4">
-  <h2 class="mb-2 text-sm font-semibold text-emerald-200">Rollback</h2>
-  <p class="mb-3 text-xs text-emerald-100/80">
+<section class="rounded-lg border border-rope/40 bg-rope/5 p-4">
+  <h2 class="mb-2 text-sm font-semibold text-foam">Rollback</h2>
+  <p class="mb-3 text-xs text-foam/80">
     Restore <span class="font-mono">{{ patch.target }}</span> from the checkpoint captured when the patch was applied.
   </p>
   <button onclick="marcoRollbackPatch('{{ patch.patch_id }}')"
-          class="rounded bg-emerald-500/30 px-4 py-1.5 text-sm text-emerald-100 hover:bg-emerald-500/50">
+          class="rounded bg-rope/30 px-4 py-1.5 text-sm text-foam hover:bg-rope/50">
     Rollback
   </button>
 </section>
