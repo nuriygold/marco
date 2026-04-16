@@ -88,9 +88,10 @@ If you want "push to branch → staging updates" without SSHing in:
 3. The staging droplet now mirrors whichever branch most recently triggered
    the workflow.
 
-This is not wired up in the repo today — the hook is intentionally not
-automatic so a PR can't silently replace staging while someone else is using
-it. Add it when the team grows past one person.
+This is wired up in `.github/workflows/deploy.yml` for `main` → production.
+For staging, add a second workflow or reuse the same one with a branch filter.
+The hook is intentionally not automatic for feature branches so a PR can't
+silently replace staging while someone else is using it.
 
 ## Option C — move to a platform with built-in previews
 
