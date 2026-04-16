@@ -23,8 +23,8 @@
   </p>
 </section>
 
-<section class="grid gap-4 md:grid-cols-5">
-  {% for label, key in [('Planned', 'planned'), ('Running', 'running'), ('Blocked', 'blocked'), ('Recoverable', 'recoverable'), ('Resumable', 'resumable')] %}
+<section class="grid gap-4 md:grid-cols-6">
+  {% for label, key in [('Planned', 'planned'), ('Running', 'running'), ('Blocked', 'blocked'), ('Recoverable', 'recoverable'), ('Resumable', 'resumable'), ('Completed', 'completed')] %}
     <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
       <h3 class="mb-2 text-xs uppercase tracking-wider text-slate-400">{{ label }}</h3>
       {% set items = buckets[key] %}

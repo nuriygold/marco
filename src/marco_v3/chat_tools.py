@@ -17,7 +17,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
-from .autonomy import create_plan, list_sessions
+from .autonomy import create_plan, execute_plan, list_sessions, recover_session
 from .memory import add_entry, list_entries, recall
 from .patches import list_patches, propose_patch
 from .repo_intel import (
@@ -201,6 +201,42 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             'parameters': {'type': 'object', 'properties': {}, 'required': []},
         },
     },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'execute_session',
+            'description': (
+                'Kick off autonomous LLM-driven execution of a session plan. '
+                'The LLM will implement each step using patches, file writes, and safe commands. '
+                'Returns a summary of what was done. Use this after create_plan when the user wants to run it.'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'session_id': {'type': 'string', 'description': 'Session ID to execute'},
+                },
+                'required': ['session_id'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'recover_session',
+            'description': (
+                'Diagnose a failed session validation and attempt LLM-driven recovery. '
+                'Reads the validation error output, identifies root causes, and applies fixes. '
+                'Use this when a session is stuck in failed/recover state.'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'session_id': {'type': 'string', 'description': 'Session ID to recover'},
+                },
+                'required': ['session_id'],
+            },
+        },
+    },
 ]
 
 
@@ -333,6 +369,50 @@ def dispatch_tool(
 
     if name == 'list_patches':
         return {'patches': [asdict(p) for p in list_patches(storage)]}
+
+    if name == 'execute_session':
+        session_id = args.get('session_id') or ''
+        if not session_id:
+            return {'error': 'session_id is required'}
+        from .config import load_profile
+        profile = load_profile(root)
+        events: list[dict] = []
+        def _capture(event: str, data: object) -> None:
+            events.append({'event': event, 'data': data})
+        try:
+            artifact = execute_plan(root, storage, profile, session_id, emit=_capture)
+            audit('session.execute', workspace=workspace_name,
+                  params={'session_id': session_id, 'status': artifact.status, 'via': 'chat'})
+            return {
+                'session_id': session_id,
+                'status': artifact.status,
+                'steps_done': artifact.artifacts.get('steps_done', 0),
+                'steps_failed': artifact.artifacts.get('steps_failed', 0),
+                'note': 'Run validate from the Sessions page to confirm the work passes tests.',
+            }
+        except RuntimeError as exc:
+            return {'error': str(exc)}
+
+    if name == 'recover_session':
+        session_id = args.get('session_id') or ''
+        if not session_id:
+            return {'error': 'session_id is required'}
+        from .config import load_profile
+        profile = load_profile(root)
+        events: list[dict] = []
+        def _capture(event: str, data: object) -> None:
+            events.append({'event': event, 'data': data})
+        try:
+            artifact = recover_session(root, storage, profile, session_id, emit=_capture)
+            audit('session.recover', workspace=workspace_name,
+                  params={'session_id': session_id, 'via': 'chat'})
+            return {
+                'session_id': session_id,
+                'status': artifact.status,
+                'note': artifact.artifacts.get('recovery_note', 'Recovery complete. Run validate to check.'),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {'error': str(exc)}
 
     return {'error': f'unknown tool: {name}'}
 

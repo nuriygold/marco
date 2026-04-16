@@ -540,7 +540,7 @@ function marcoChatRenderMessage(msg) {
 
   const body = document.createElement('div');
   body.className = 'whitespace-pre-wrap';
-  body.textContent = msg.content || '';
+  body.innerHTML = _marcoHighlightQuestions(msg.content || '');
   bubble.appendChild(body);
 
   if (msg.tools_used && msg.tools_used.length) {
@@ -636,7 +636,7 @@ async function _marcoChatStream(message, convId, bodyEl, toolsEl, statusEl, send
           toolsEl.appendChild(d);
         } else if (evtName === 'done') {
           const msg = JSON.parse(data);
-          bodyEl.textContent = msg.content || '';
+          bodyEl.innerHTML = _marcoHighlightQuestions(msg.content || '');
           toolsEl.innerHTML = '';
           (msg.tools_used || []).forEach(t => {
             const d = document.createElement('details');
@@ -949,6 +949,14 @@ function parseSSE(block) {
     else if (line.startsWith('data: ')) data.push(line.slice(6));
   }
   return { event, data: data.join('\n') };
+}
+
+/** Wrap sentences ending with '?' in a red highlight span for readability. */
+function _marcoHighlightQuestions(text) {
+  const escaped = escapeHtml(text);
+  // Match sentences that end with '?' — including the question mark.
+  // Handles lines like "What is X?" and "Is this ready? Let me check."
+  return escaped.replace(/([^\n.!?]*\?)/g, '<span class="text-red-400 font-medium">$1</span>');
 }
 
 function escapeHtml(str) {

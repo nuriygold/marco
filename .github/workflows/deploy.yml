@@ -1,0 +1,23 @@
+name: Deploy to marco.nuriy.com
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: marco.nuriy.com
+          username: marco
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /home/marco/marco
+            ./deploy/update.sh main
