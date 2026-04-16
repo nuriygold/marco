@@ -12,6 +12,27 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Validate DEPLOY_SSH_KEY secret
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::DEPLOY_SSH_KEY secret is not set."
+            echo ""
+            echo "To fix this:"
+            echo "  1. Generate a deploy key on the Droplet as the marco user:"
+            echo "       ssh-keygen -t ed25519 -C 'github-actions-deploy' -f ~/.ssh/deploy_key -N ''"
+            echo "  2. Add the public key to ~/.ssh/authorized_keys on the Droplet:"
+            echo "       cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys"
+            echo "  3. Copy the private key contents:"
+            echo "       cat ~/.ssh/deploy_key"
+            echo "  4. In GitHub: Settings → Secrets and variables → Actions → New repository secret"
+            echo "       Name:  DEPLOY_SSH_KEY"
+            echo "       Value: (paste the private key, including the BEGIN/END lines)"
+            exit 1
+          fi
+          echo "DEPLOY_SSH_KEY is configured."
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
