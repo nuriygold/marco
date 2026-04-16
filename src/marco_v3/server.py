@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .autonomy import (
+    complete_session,
     create_plan,
     execute_plan,
     list_sessions,
@@ -257,7 +258,8 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
             'running': [s for s in sessions if s.status == 'running'],
             'blocked': [s for s in sessions if s.status == 'failed'],
             'recoverable': [s for s in sessions if s.phase == 'recover'],
-            'resumable': [s for s in sessions if s.status in ('passed', 'ready') and s.phase != 'plan'],
+            'resumable': [s for s in sessions if s.status in ('passed', 'ready') and s.phase not in ('plan', 'completed')],
+            'completed': [s for s in sessions if s.phase == 'completed' or s.status == 'completed'],
         }
         return templates.TemplateResponse(
             request, 'sessions.html', _page_context(sessions=sessions, buckets=buckets)
@@ -655,13 +657,38 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
     async def api_execute(session_id: str) -> StreamingResponse:
         ws = _require_active_workspace(registry_path)
         storage = _storage_for(ws)
+        root = _workspace_root(ws)
 
-        def run():
-            artifact = execute_plan(storage, session_id)
-            audit_record('session.execute', workspace=ws.name, params={'session_id': session_id})
-            return asdict(artifact)
+        async def generate() -> AsyncIterator[str]:
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            loop = asyncio.get_event_loop()
 
-        return StreamingResponse(stream_sync_callable(run), media_type='text/event-stream')
+            def emit(event: str, data: Any) -> None:
+                loop.call_soon_threadsafe(queue.put_nowait, format_sse(event, data))
+
+            def run() -> None:
+                try:
+                    artifact = execute_plan(root, storage, SERVER_PROFILE, session_id, emit=emit)
+                    audit_record('session.execute', workspace=ws.name,
+                                 params={'session_id': session_id, 'status': artifact.status})
+                except RuntimeError as exc:
+                    # LLM not configured — surface as error event
+                    emit('error', {'message': str(exc)})
+                except Exception as exc:  # noqa: BLE001
+                    emit('error', {'message': str(exc)})
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+            t.join(timeout=5)
+
+        return StreamingResponse(generate(), media_type='text/event-stream')
 
     @app.post('/api/sessions/{session_id}/validate')
     async def api_validate(session_id: str) -> StreamingResponse:
@@ -684,13 +711,35 @@ def create_app(*, registry_path: Path = REGISTRY_PATH, auth: AuthConfig | None =
     async def api_recover(session_id: str) -> StreamingResponse:
         ws = _require_active_workspace(registry_path)
         storage = _storage_for(ws)
+        root = _workspace_root(ws)
 
-        def run():
-            artifact = recover_session(storage, session_id)
-            audit_record('session.recover', workspace=ws.name, params={'session_id': session_id})
-            return asdict(artifact)
+        async def generate() -> AsyncIterator[str]:
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            loop = asyncio.get_event_loop()
 
-        return StreamingResponse(stream_sync_callable(run), media_type='text/event-stream')
+            def emit(event: str, data: Any) -> None:
+                loop.call_soon_threadsafe(queue.put_nowait, format_sse(event, data))
+
+            def run() -> None:
+                try:
+                    artifact = recover_session(root, storage, SERVER_PROFILE, session_id, emit=emit)
+                    audit_record('session.recover', workspace=ws.name,
+                                 params={'session_id': session_id})
+                except Exception as exc:  # noqa: BLE001
+                    emit('error', {'message': str(exc)})
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+            t.join(timeout=5)
+
+        return StreamingResponse(generate(), media_type='text/event-stream')
 
     @app.get('/api/sessions/{session_id}')
     async def api_session_detail(session_id: str) -> dict[str, Any]:
