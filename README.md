@@ -21,6 +21,10 @@ Marco is designed with a strong operator personality:
 - The `rust/` workspace is an active systems track.
 - The web console is served by `src/marco_v3/server.py` (FastAPI + Uvicorn).
 
+## Live Instance
+
+**[marco.nuriy.com](https://marco.nuriy.com)** — deployed on a DigitalOcean Droplet behind Caddy. See `deploy/` for setup docs.
+
 ## Web Console
 
 Marco ships a browser-based operator console at `/console`. Key features:
