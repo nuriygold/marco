@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +39,7 @@ def record(
     path: Path = AUDIT_PATH,
 ) -> AuditEntry:
     entry = AuditEntry(
-        ts=datetime.now(UTC).isoformat(),
+        ts=datetime.now(timezone.utc).isoformat(),
         workspace=workspace,
         actor=actor,
         action=action,

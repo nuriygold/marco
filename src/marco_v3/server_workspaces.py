@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -52,7 +52,7 @@ def save_registry(registry: Registry, path: Path = REGISTRY_PATH) -> None:
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _normalize_name(name: str) -> str:

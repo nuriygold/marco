@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import shlex
 import subprocess
 import uuid
@@ -11,6 +12,15 @@ from typing import Any, Callable
 from .config import ALLOWED_SCRIPT_PREFIXES, SHELL_META, MarcoProfile
 from .repo_intel import discover_scripts, where_edit
 from .storage import MarcoStorage
+
+
+def _llm_module():
+    """Resolve llm lazily.
+
+    Uses importlib so tests can inject ``src.marco_v3.llm`` in ``sys.modules``
+    without mutating the package-level ``src.marco_v3.llm`` export.
+    """
+    return importlib.import_module('src.marco_v3.llm')
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +403,7 @@ def _run_llm_loop(
     max_iterations: int,
 ) -> list[dict[str, Any]]:
     """Run the LLM tool-calling loop. Returns the final messages list."""
-    from . import llm
+    llm = _llm_module()
 
     for _ in range(max_iterations):
         response = llm.chat_completion(
@@ -478,7 +488,7 @@ def execute_plan(
     *,
     emit: Callable[[str, Any], None] = lambda event, data: None,
 ) -> SessionArtifact:
-    from . import llm
+    llm = _llm_module()
 
     if not llm.is_configured():
         raise RuntimeError(
@@ -605,7 +615,7 @@ def recover_session(
     *,
     emit: Callable[[str, Any], None] = lambda event, data: None,
 ) -> SessionArtifact:
-    from . import llm
+    llm = _llm_module()
 
     if not llm.is_configured():
         # Graceful fallback: static recovery tips (old behaviour)
