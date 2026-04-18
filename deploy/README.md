@@ -250,7 +250,29 @@ auto-registers the Droplet's Marco repo as the first workspace. Use the
 **Add workspace** form in the sidebar to register any other repos you want to
 operate on (absolute paths on the Droplet filesystem).
 
-## 10. Updating Marco
+## 10. GitHub Actions CI/CD (DEPLOY_SSH_KEY)
+
+The `.github/workflows/deploy.yml` workflow SSH-es into the Droplet on every
+push to `main` and runs `deploy/update.sh`. It needs a dedicated deploy key:
+
+**On the Droplet, as the `marco` user:**
+
+```bash
+ssh-keygen -t ed25519 -C 'github-actions-deploy' -f ~/.ssh/deploy_key -N ''
+cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys
+cat ~/.ssh/deploy_key   # copy this output
+```
+
+**In GitHub — Settings → Secrets and variables → Actions → New repository secret:**
+
+| Name | Value |
+|------|-------|
+| `DEPLOY_SSH_KEY` | Paste the full private key (including `-----BEGIN/END-----` lines) |
+
+Without this secret the workflow fails immediately with
+`can't connect without a private SSH key or password`.
+
+## 11. Updating Marco
 
 ```bash
 cd /home/marco/marco
