@@ -110,11 +110,13 @@ def get_active(registry_path: Path = REGISTRY_PATH) -> Workspace | None:
 
 
 def ensure_workspace_from_cwd(registry_path: Path = REGISTRY_PATH) -> Workspace | None:
-    """Auto-register CWD as a workspace if nothing is registered yet."""
+    """Auto-register the nearest git repo from CWD if nothing is registered yet."""
     registry = load_registry(registry_path)
     if registry.workspaces:
         return get_active(registry_path)
-    cwd = Path(os.getcwd())
-    if not (cwd / '.git').exists():
+    cwd = Path(os.getcwd()).resolve()
+    candidates = [cwd, *cwd.parents]
+    repo_root = next((path for path in candidates if (path / '.git').exists()), None)
+    if repo_root is None:
         return None
-    return add_workspace(cwd.name, cwd, registry_path)
+    return add_workspace(repo_root.name, repo_root, registry_path)
