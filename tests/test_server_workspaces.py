@@ -75,5 +75,23 @@ class WorkspaceRegistryTests(unittest.TestCase):
             os.chdir(cwd_before)
 
 
+    def test_ensure_from_cwd_finds_parent_git_repo(self) -> None:
+        import os
+
+        (self.repo / '.git').mkdir()
+        nested = self.repo / 'nested' / 'deeper'
+        nested.mkdir(parents=True)
+        cwd_before = os.getcwd()
+        os.chdir(nested)
+        try:
+            ws = ensure_workspace_from_cwd(registry_path=self.registry)
+            self.assertIsNotNone(ws)
+            assert ws is not None
+            self.assertEqual(ws.name, 'repo')
+            self.assertEqual(Path(ws.path), self.repo.resolve())
+        finally:
+            os.chdir(cwd_before)
+
+
 if __name__ == '__main__':
     unittest.main()
